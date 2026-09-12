@@ -195,7 +195,9 @@ async function handleExtract() {
 // ---------------------------------------------------------------------------
 
 async function runDigest(kind, payload) {
-  const label = kind === 'current' ? '正在读取当前页面并调用本地模型' : '正在打开链接并调用本地模型';
+  const label = kind === 'current'
+    ? '正在读取当前页面并调用本地模型'
+    : '正在打开链接、等页面渲染后调用模型';
 
   setBusy(true, label);
 
@@ -242,17 +244,29 @@ function renderResult(resp, origin) {
     return;
   }
 
-  const { value, meta, attempts, source } = resp;
+  const { value, meta, attempts, source, extract } = resp;
 
-  els.resultSource.textContent = source?.title
-    ? `${source.title} · ${hostOf(source.url)}`
-    : source?.url || '—';
+  els.resultSource.textContent = describeSource(source);
 
   if (value.ok === true) {
     els.resultBody.append(
       el('p', 'result-summary', value.summary),
       buildPoints(value.points)
     );
+
+    if (extract?.foregroundFallback) {
+      els.resultBody.append(
+        el(
+          'p',
+          'hint',
+          '这个页面的正文是切到前台之后才渲染出来的 —— 后台标签页会被浏览器节流，靠滚动才加载的内容不出来。'
+        )
+      );
+    }
+  } else if (extract?.lowContent) {
+    // 抓取阶段就没拿到正文。和「模型认为它不是内容主体」是两回事，
+    // 混成一句话会让用户完全不知道下一步该干什么。
+    renderLowContentNotice(resp);
   } else {
     // 模型判定这一页没有可消化的正文主体（登录页 / 错误页 / 导航页等），
     // 属于设计内的护栏，不是报错。
@@ -271,6 +285,12 @@ function renderResult(resp, origin) {
     els.resultBody.append(box);
   }
 
+  if (extract?.keptTabOpen) {
+    els.resultBody.append(
+      el('p', 'hint', '抓取用的那个标签页保留着没关，可以切过去看看它到底加载出了什么。')
+    );
+  }
+
   els.resultMeta.textContent = buildMetaText(meta, attempts);
 
   const lastAttempt = attempts?.[attempts.length - 1];
@@ -278,6 +298,45 @@ function renderResult(resp, origin) {
     els.resultRaw.textContent = lastAttempt.raw;
     setHidden(els.resultRawWrap, false);
   }
+}
+
+// 来源行：标题 · 域名（抓到 N 字）。
+// 字数必须露出来 —— 用户第一眼要靠它判断「抓到的是文章还是导航页」。
+function describeSource(source) {
+  const name = source?.title
+    ? `${source.title} · ${hostOf(source.url)}`
+    : source?.url || '—';
+
+  return source?.charCount ? `${name}（抓到 ${source.charCount} 字）` : name;
+}
+
+// 「页面没渲染出正文」专用提示。和模型护栏分开写，因为下一步的动作完全不同。
+function renderLowContentNotice(resp) {
+  const chars = resp?.source?.charCount || 0;
+
+  const box = el('div', 'notice');
+  box.append(
+    el('p', 'notice-title', '这个页面没抓到正文'),
+    el(
+      'p',
+      'notice-body',
+      `只抓到 ${chars} 个字，基本是导航和页脚。不是模型偷懒 —— 是页面还没把正文渲染出来。常见原因：正文靠 JS 动态加载、需要登录、或者拦了自动访问。`
+    )
+  );
+
+  if (resp?.extract?.foregroundFallback) {
+    box.append(el('p', 'notice-body', '已经试过把标签页切到前台多等 6 秒，依然没出来。'));
+  }
+
+  box.append(
+    el(
+      'p',
+      'hint',
+      '如果这一页你自己打开能看到完整内容：切到那个标签页，用上面的「当前页面」入口再点一次 —— 手动打开的页面已经渲染好了，一定能抓到。'
+    )
+  );
+
+  els.resultBody.append(box);
 }
 
 function buildPoints(points) {
@@ -289,7 +348,7 @@ function buildPoints(points) {
 function renderFailure(resp) {
   const error = resp?.error || '未知原因';
 
-  els.resultSource.textContent = resp?.source?.url || '—';
+  els.resultSource.textContent = describeSource(resp?.source);
   els.resultBody.className = 'notice';
 
   els.resultBody.append(

@@ -82,6 +82,16 @@ async function digestAndStore(extracted) {
       charCount: extracted.charCount || 0,
       origin: extracted.source || ''
     },
+    // 抓取侧的诊断，透传给 UI。
+    // 没有它，用户看到「这一页没有可消化的正文」时无法分辨到底是
+    // 「页面没渲染出正文（SPA / 登录墙）」还是「模型认为它不是内容主体」，
+    // 这两种情况要说完全不同的话、给完全不同的下一步。
+    extract: {
+      lowContent: !!extracted.lowContent,
+      keptTabOpen: !!extracted.keptTabOpen,
+      foregroundFallback: !!extracted.foregroundFallback,
+      minChars: extracted.minChars || null
+    },
     finishedAt: Date.now()
   };
 
