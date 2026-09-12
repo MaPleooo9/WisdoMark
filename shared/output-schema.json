@@ -1,9 +1,13 @@
 {
   "_comment": "单一来源：消化结果的结构与校验规则。插件与阶段 3 的 Python 评测脚本共用，Python 侧按同一份规则实现校验（两边对同一份 JSON 解释一致）。",
 
-  "version": "1.1.0",
+  "version": "1.2.1",
 
-  "_pointsSemantics": "points 的 3 条随内容体裁而定：观点类文章是核心观点，工具推荐类是关键事实，更新公告类是关键变化，教程类是关键步骤，清单类是具体条目。校验只看结构（数量 / 长度 / 去重），不校验语义 —— 语义由 prompt.json 的 system 约束。",
+  "_pointsSemantics": "points 的条数一般 3 条，教程/指南类步骤多或清单类条目多时允许 4~5 条 —— 结构上放宽是为了避免模型为了凑 3 条而丢掉关键步骤。提炼角度按体裁而定：观点类是核心观点，工具推荐类是关键事实，公告类是关键变化，教程类是关键步骤，清单类是具体条目。校验只看结构（条数 / 长度 / 去重），不校验语义 —— 语义由 prompt.json 的 system 约束。",
+
+  "_lengthPolicy": "itemMaxLen 取各分类里最宽的那个（技术学习 220 字），是「防注水」的硬上限，不是目标长度。真正的详略梯度写在 prompt.json 的 system 里按 category 分派 —— 校验不做分类相关的分支，避免分类判错时把长度也一起判错（那会制造假失败，而 8B 模型经不起多重硬约束）。",
+
+  "_categories": "5 类，与 prompt.json 的 system 里「先分类」一节逐一对应。改这里必须同步改 prompt.json，反之亦然。",
 
   "base": {
     "ok": { "type": "boolean", "required": true }
@@ -13,12 +17,17 @@
     {
       "when": { "ok": true },
       "fields": {
+        "category": {
+          "type": "enum",
+          "values": ["技术学习", "工具与产品", "资讯与公告", "游戏娱乐", "其他"]
+        },
         "summary": { "type": "string", "minLen": 8, "maxLen": 160 },
         "points": {
           "type": "string[]",
-          "exactLen": 3,
+          "minItems": 3,
+          "maxItems": 5,
           "itemMinLen": 6,
-          "itemMaxLen": 120,
+          "itemMaxLen": 220,
           "uniqueItems": true
         }
       }

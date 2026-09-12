@@ -124,12 +124,38 @@ function validateField(raw, rule, name) {
     return errors.length ? { errors } : { errors, value };
   }
 
+  // 枚举：值必须来自 schema 里声明的白名单。
+  // 分类字段用它 —— 模型自由发挥出「技术/AI」这类近义写法时，宁可重试也不要污染后续的归类与统计。
+  if (rule.type === 'enum') {
+    if (typeof raw !== 'string') {
+      return { errors: [`${name} 必须是字符串，收到 ${describe(raw)}`] };
+    }
+
+    const value = raw.trim();
+    const values = rule.values || [];
+
+    if (!values.includes(value)) {
+      return {
+        errors: [`${name} 取值不在允许范围内：收到 ${JSON.stringify(value)}，允许 ${values.join(' / ')}`]
+      };
+    }
+
+    return { errors, value };
+  }
+
   if (rule.type === 'string[]') {
     if (!Array.isArray(raw)) return { errors: [`${name} 必须是数组，收到 ${describe(raw)}`] };
 
     if (rule.exactLen != null && raw.length !== rule.exactLen) {
       return { errors: [`${name} 必须恰好 ${rule.exactLen} 条，收到 ${raw.length} 条`] };
     }
+    if (rule.minItems != null && raw.length < rule.minItems) {
+      return { errors: [`${name} 至少 ${rule.minItems} 条，收到 ${raw.length} 条`] };
+    }
+    if (rule.maxItems != null && raw.length > rule.maxItems) {
+      return { errors: [`${name} 最多 ${rule.maxItems} 条，收到 ${raw.length} 条`] };
+    }
+    // 兼容旧写法：数组上的 minLen 与 minItems 同义
     if (rule.minLen != null && raw.length < rule.minLen) {
       return { errors: [`${name} 至少 ${rule.minLen} 条，收到 ${raw.length} 条`] };
     }

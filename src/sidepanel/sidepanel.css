@@ -376,6 +376,45 @@ body {
   word-break: break-word;
 }
 
+/* 分类徽标 —— 5 类各一个色，让用户一眼分辨这条内容是什么类型。
+   分类名是中文，不能直接当 class，所以用 data-category 属性选择器。
+   全部走「浅底 + 深字」，与整体浅色主题一致。 */
+.result-category {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.result-category[data-category="技术学习"] {
+  background: #eef0fe;
+  color: #4f46e5;
+}
+
+.result-category[data-category="工具与产品"] {
+  background: #e6f6f1;
+  color: #0f8a6a;
+}
+
+.result-category[data-category="资讯与公告"] {
+  background: #eaf2fd;
+  color: #2563c9;
+}
+
+.result-category[data-category="游戏娱乐"] {
+  background: #fdeef4;
+  color: #c2326f;
+}
+
+.result-category[data-category="其他"] {
+  background: #f0f1f4;
+  color: #5b6472;
+}
+
 .result-summary {
   margin: 0 0 10px;
   font-size: 13px;

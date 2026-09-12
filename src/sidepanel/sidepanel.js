@@ -249,9 +249,11 @@ function renderResult(resp, origin) {
   els.resultSource.textContent = describeSource(source);
 
   if (value.ok === true) {
+    // 分类徽标可能为 null（阶段 1 落下的老结果没有 category 字段），过滤掉再插入
+    const chip = buildCategoryChip(value.category);
+
     els.resultBody.append(
-      el('p', 'result-summary', value.summary),
-      buildPoints(value.points)
+      ...[chip, el('p', 'result-summary', value.summary), buildPoints(value.points)].filter(Boolean)
     );
 
     if (extract?.foregroundFallback) {
@@ -337,6 +339,16 @@ function renderLowContentNotice(resp) {
   );
 
   els.resultBody.append(box);
+}
+
+// 分类徽标。分类名是中文，不能直接当 class 用，所以走 data-category 让 CSS 选。
+// 老结果（阶段 1 存的，没有 category 字段）返回 null，由调用方过滤。
+function buildCategoryChip(category) {
+  if (!category) return null;
+
+  const chip = el('span', 'result-category', category);
+  chip.dataset.category = category;
+  return chip;
 }
 
 function buildPoints(points) {
