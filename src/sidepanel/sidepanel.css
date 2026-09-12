@@ -11,8 +11,11 @@
   --accent: #4f46e5;
   --accent-soft: #eef0fe;
   --ok: #12a150;
+  --ok-soft: #e8f7ee;
   --fail: #d93b3b;
+  --fail-soft: #fdecec;
   --warn: #c8871a;
+  --warn-soft: #fdf5e6;
   --radius: 10px;
 }
 
@@ -147,6 +150,47 @@ body {
   letter-spacing: 0.6px;
 }
 
+.is-hidden {
+  display: none !important;
+}
+
+/* ---------- 输入区标签页 ---------- */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 12px;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.tab {
+  flex: 1;
+  padding: 6px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.is-active {
+  background: var(--card);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+/* ---------- 字段 ---------- */
+
 .field + .field {
   margin-top: 9px;
 }
@@ -171,11 +215,28 @@ body {
   word-break: break-all;
 }
 
-/* ---------- 按钮 ---------- */
+/* ---------- 输入框与按钮 ---------- */
+
+.input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--card);
+}
 
 .btn {
   width: 100%;
-  margin-top: 12px;
+  margin-top: 10px;
   padding: 8px 12px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -208,7 +269,7 @@ body {
   opacity: 1;
 }
 
-/* ---------- 提示与列表 ---------- */
+/* ---------- 提示 ---------- */
 
 .hint {
   margin: 8px 0 0;
@@ -225,7 +286,18 @@ body {
   color: var(--fail);
 }
 
-.model-list {
+.run-status {
+  padding: 7px 9px;
+  margin-bottom: 0;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 列表 ---------- */
+
+.row-list {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
@@ -234,25 +306,221 @@ body {
   gap: 6px;
 }
 
-.model-list li {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 7px 9px;
+.row-item {
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--bg);
+  overflow: hidden;
 }
 
-.model-name {
+.row-btn,
+.row-static {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.row-static {
+  cursor: default;
+}
+
+.row-btn:hover {
+  background: var(--accent-soft);
+}
+
+.row-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.row-title {
+  font-size: 12.5px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-host {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 模型名用等宽字体更清楚 */
+#model-list .row-title {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
   font-weight: 600;
 }
 
-.model-meta {
+/* ---------- 结果 ---------- */
+
+.result-source {
+  margin: 0 0 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  word-break: break-word;
+}
+
+.result-summary {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.points {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.points li {
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* 模型判定「不是文章」的护栏提示 —— 设计内的结果，不用红色 */
+.notice {
+  padding: 10px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-soft);
+}
+
+.notice-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--warn);
+}
+
+.notice-body {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+.attempts {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.attempts-title {
+  margin: 0 0 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.attempt-line {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  word-break: break-word;
+}
+
+/* ---------- 原始输出 ---------- */
+
+.raw {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.raw summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.raw-pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-dim);
+}
+
+/* ---------- 可折叠卡片 ---------- */
+
+.details-card {
+  padding: 12px;
+}
+
+.details-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.details-summary::before {
+  content: "▸";
+  flex-shrink: 0;
+  margin-right: 6px;
+  color: var(--text-faint);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.details-card[open] .details-summary::before {
+  transform: rotate(90deg);
+}
+
+.details-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.details-note {
   font-size: 10.5px;
   color: var(--text-faint);
+  text-align: right;
+  word-break: break-word;
+}
+
+.details-note.is-ok {
+  color: var(--ok);
+}
+
+.details-note.is-fail {
+  color: var(--fail);
 }
 
 /* ---------- 底栏 ---------- */

@@ -1,20 +1,47 @@
-// WisdoMark · 侧栏界面逻辑
+// WisdoMark · 侧栏界面逻辑（阶段 1）
 //
 // 侧栏随时可能被关闭重开，所以不依赖内存状态：
 // 需要留存的内容一律落 chrome.storage，重开时先渲染缓存再刷新。
 
 const els = {
-  ollamaStatus: document.getElementById('ollama-status'),
+  // 消息 / 状态
   ollamaDot: document.getElementById('ollama-dot'),
   ollamaLabel: document.getElementById('ollama-label'),
   ollamaDetail: document.getElementById('ollama-detail'),
   modelList: document.getElementById('model-list'),
+  btnRecheck: document.getElementById('btn-recheck'),
+  runStatus: document.getElementById('run-status'),
+
+  // 输入区
+  inputTabs: document.getElementById('input-tabs'),
+  panes: {
+    paste: document.getElementById('pane-paste'),
+    bookmarks: document.getElementById('pane-bookmarks'),
+    current: document.getElementById('pane-current')
+  },
+  urlInput: document.getElementById('url-input'),
+  btnDigestUrl: document.getElementById('btn-digest-url'),
+  btnLoadBookmarks: document.getElementById('btn-load-bookmarks'),
+  bookmarkList: document.getElementById('bookmark-list'),
+  bookmarkHint: document.getElementById('bookmark-hint'),
   pageTitle: document.getElementById('page-title'),
   pageUrl: document.getElementById('page-url'),
+  btnDigestCurrent: document.getElementById('btn-digest-current'),
   btnExtract: document.getElementById('btn-extract'),
   extractResult: document.getElementById('extract-result'),
-  btnRecheck: document.getElementById('btn-recheck')
+
+  // 结果区
+  resultCard: document.getElementById('result-card'),
+  resultSource: document.getElementById('result-source'),
+  resultBody: document.getElementById('result-body'),
+  resultMeta: document.getElementById('result-meta'),
+  resultRawWrap: document.getElementById('result-raw-wrap'),
+  resultRaw: document.getElementById('result-raw')
 };
+
+// ---------------------------------------------------------------------------
+// 基础设施
+// ---------------------------------------------------------------------------
 
 // 把回调式 sendMessage 包成 Promise，避免各处重复处理 lastError
 function send(type, payload = {}) {
@@ -30,6 +57,85 @@ function send(type, payload = {}) {
   });
 }
 
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function setHidden(node, hidden) {
+  node.classList.toggle('is-hidden', hidden);
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+// 消化要 5~15 秒，不给反馈用户会以为卡死。显示一个走秒的计时器。
+let ticker = null;
+
+function startRunStatus(label) {
+  const startedAt = Date.now();
+
+  const paint = () => {
+    const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+    els.runStatus.textContent = `${label}… 已用 ${seconds} 秒`;
+  };
+
+  setHidden(els.runStatus, false);
+  paint();
+  stopRunStatus();
+  ticker = setInterval(paint, 100);
+}
+
+function stopRunStatus() {
+  if (ticker) {
+    clearInterval(ticker);
+    ticker = null;
+  }
+}
+
+function setBusy(busy, label) {
+  els.btnDigestUrl.disabled = busy;
+  els.btnLoadBookmarks.disabled = busy;
+  applyUnsupported(busy);
+
+  for (const btn of els.bookmarkList.querySelectorAll('button')) btn.disabled = busy;
+
+  if (busy) {
+    startRunStatus(label || '处理中');
+  } else {
+    stopRunStatus();
+    setHidden(els.runStatus, true);
+  }
+}
+
+// 当前页不支持注入时（浏览器内部页 / 扩展页）按钮要一直禁用，
+// 不能因为 setBusy(false) 又把它放出来
+function applyUnsupported(busy) {
+  els.btnDigestCurrent.disabled =
+    busy || els.btnDigestCurrent.dataset.unsupported === '1';
+  els.btnExtract.disabled = busy || els.btnExtract.dataset.unsupported === '1';
+}
+
+// ---------------------------------------------------------------------------
+// 输入区标签页
+// ---------------------------------------------------------------------------
+
+function switchPane(name) {
+  for (const btn of els.inputTabs.querySelectorAll('.tab')) {
+    btn.classList.toggle('is-active', btn.dataset.pane === name);
+  }
+  for (const [key, pane] of Object.entries(els.panes)) {
+    setHidden(pane, key !== name);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 当前页面
 // ---------------------------------------------------------------------------
@@ -40,56 +146,242 @@ async function refreshActiveTab() {
   if (!resp?.ok) {
     els.pageTitle.textContent = '—';
     els.pageUrl.textContent = resp?.error || '取不到当前标签页';
-    els.btnExtract.disabled = true;
+    els.btnDigestCurrent.dataset.unsupported = '1';
+    els.btnExtract.dataset.unsupported = '1';
+    applyUnsupported(false);
     return;
   }
 
   els.pageTitle.textContent = resp.tab.title || '（无标题）';
   els.pageUrl.textContent = resp.tab.url || '（无 URL）';
-  els.btnExtract.disabled = !resp.tab.injectable;
+
+  const supported = resp.tab.injectable ? '0' : '1';
+  els.btnDigestCurrent.dataset.unsupported = supported;
+  els.btnExtract.dataset.unsupported = supported;
+  applyUnsupported(false);
 
   if (!resp.tab.injectable) {
+    els.extractResult.className = 'hint';
     els.extractResult.textContent = '当前页面不支持抓取（浏览器内部页面或扩展页面）';
   }
 }
 
-// ---------------------------------------------------------------------------
-// 抓正文
-// ---------------------------------------------------------------------------
-
+// 只抓正文，不调模型 —— 留给排查用（比如怀疑正文提取有问题时）
 async function handleExtract() {
-  els.btnExtract.disabled = true;
-  els.btnExtract.textContent = '抓取中…';
+  setBusy(true, '正在抓取正文');
   els.extractResult.className = 'hint';
-  els.extractResult.textContent = '';
 
-  const resp = await send('EXTRACT_ACTIVE_PAGE');
-
-  els.btnExtract.textContent = '抓取正文';
+  let resp;
+  try {
+    resp = await send('EXTRACT_ACTIVE_PAGE');
+  } catch (err) {
+    resp = { ok: false, error: err.message };
+  } finally {
+    setBusy(false);
+  }
 
   if (!resp?.ok) {
     els.extractResult.className = 'hint is-fail';
     els.extractResult.textContent = `抓取失败：${resp?.error || '未知原因'}`;
-    els.btnExtract.disabled = false;
     return;
   }
 
-  // 阶段 0 只验证「注入链路通不通」，先报告规模，不送模型
   els.extractResult.className = 'hint is-ok';
-  els.extractResult.textContent = `已抓到 ${resp.charCount} 字（标题：${resp.title || '无'}）`;
+  els.extractResult.textContent = `已抓到 ${resp.charCount} 字（${resp.title || '无标题'}）`;
+}
 
-  // 凑合看一眼正文质量，落 storage 便于后续阶段复用
-  await chrome.storage.local.set({
-    lastExtract: {
-      url: resp.url,
-      title: resp.title,
-      charCount: resp.charCount,
-      preview: resp.text.slice(0, 200),
-      extractedAt: Date.now()
+// ---------------------------------------------------------------------------
+// 消化
+// ---------------------------------------------------------------------------
+
+async function runDigest(kind, payload) {
+  const label = kind === 'current' ? '正在读取当前页面并调用本地模型' : '正在打开链接并调用本地模型';
+
+  setBusy(true, label);
+
+  let resp;
+  try {
+    resp = kind === 'current'
+      ? await send('DIGEST_ACTIVE_PAGE')
+      : await send('DIGEST_URL', payload);
+  } catch (err) {
+    resp = { ok: false, error: err.message };
+  } finally {
+    setBusy(false);
+  }
+
+  renderResult(resp, kind === 'current' ? 'current' : 'url');
+}
+
+function handleDigestUrl() {
+  const value = els.urlInput.value.trim();
+
+  // 留空 = 用当前页面，省得用户为了读当前页还得先把链接复制出来
+  if (!value) {
+    runDigest('current');
+    return;
+  }
+
+  runDigest('url', { url: value });
+}
+
+// ---------------------------------------------------------------------------
+// 结果渲染
+// ---------------------------------------------------------------------------
+
+function renderResult(resp, origin) {
+  els.resultBody.innerHTML = '';
+  els.resultBody.className = '';
+  els.resultMeta.textContent = '';
+  setHidden(els.resultRawWrap, true);
+  setHidden(els.resultCard, false);
+
+  // 落库失败（网络 / 抓取 / 校验耗尽）—— 用抓取到的来源信息兜底显示
+  if (!resp || resp.ok !== true) {
+    renderFailure(resp);
+    return;
+  }
+
+  const { value, meta, attempts, source } = resp;
+
+  els.resultSource.textContent = source?.title
+    ? `${source.title} · ${hostOf(source.url)}`
+    : source?.url || '—';
+
+  if (value.ok === true) {
+    els.resultBody.append(
+      el('p', 'result-summary', value.summary),
+      buildPoints(value.points)
+    );
+  } else {
+    // 模型自己判定「这不是一篇能消化的文章」，属于设计内的护栏，不是报错
+    const box = el('div', 'notice');
+    box.append(
+      el('p', 'notice-title', '模型判定这篇文章无法消化'),
+      el('p', 'notice-body', value.reason || '未给出原因')
+    );
+    els.resultBody.append(box);
+  }
+
+  els.resultMeta.textContent = buildMetaText(meta, attempts, source);
+
+  const lastAttempt = attempts?.[attempts.length - 1];
+  if (lastAttempt?.raw) {
+    els.resultRaw.textContent = lastAttempt.raw;
+    setHidden(els.resultRawWrap, false);
+  }
+}
+
+function buildPoints(points) {
+  const list = el('ol', 'points');
+  for (const point of points) list.append(el('li', null, point));
+  return list;
+}
+
+function renderFailure(resp) {
+  const error = resp?.error || '未知原因';
+
+  els.resultSource.textContent = resp?.source?.url || '—';
+  els.resultBody.className = 'notice';
+
+  els.resultBody.append(
+    el('p', 'notice-title', '消化失败'),
+    el('p', 'notice-body', error)
+  );
+
+  const attempts = resp?.attempts || [];
+  if (attempts.length) {
+    const box = el('div', 'attempts');
+    box.append(el('p', 'attempts-title', `共尝试 ${attempts.length} 次`));
+    for (const a of attempts) {
+      const line = a.errors?.length
+        ? `第 ${a.attempt} 次 · ${a.elapsedMs} ms · ${a.errors.join('；')}`
+        : `第 ${a.attempt} 次 · ${a.elapsedMs} ms`;
+      box.append(el('p', 'attempt-line', line));
     }
-  });
+    els.resultBody.append(box);
+  }
 
-  els.btnExtract.disabled = false;
+  if (resp?.keptTabOpen) {
+    els.resultBody.append(
+      el('p', 'notice-body', '为方便排查，抓取用的标签页保留着，没有自动关闭。')
+    );
+  }
+
+  const lastAttempt = attempts[attempts.length - 1];
+  if (lastAttempt?.raw) {
+    els.resultRaw.textContent = lastAttempt.raw;
+    setHidden(els.resultRawWrap, false);
+  }
+}
+
+function buildMetaText(meta, attempts, source) {
+  if (!meta) return '';
+
+  const parts = [
+    `模型 ${meta.model}`,
+    `尝试 ${attempts.length} 次`,
+    `共 ${attempts.reduce((sum, a) => sum + (a.elapsedMs || 0), 0)} ms`
+  ];
+
+  if (meta.truncated) {
+    parts.push(`正文已截断 ${source.originalChars} → ${source.usedChars} 字`);
+  }
+
+  if (meta.droppedFields?.length) {
+    parts.push(`丢弃多余字段：${meta.droppedFields.join('、')}`);
+  }
+
+  return parts.join(' · ');
+}
+
+// ---------------------------------------------------------------------------
+// 最近收藏
+// ---------------------------------------------------------------------------
+
+async function handleLoadBookmarks() {
+  els.btnLoadBookmarks.disabled = true;
+  els.btnLoadBookmarks.textContent = '读取中…';
+  els.bookmarkHint.className = 'hint';
+
+  let resp;
+  try {
+    resp = await send('GET_RECENT_BOOKMARKS', { limit: 20 });
+  } catch (err) {
+    resp = { ok: false, error: err.message };
+  }
+
+  els.btnLoadBookmarks.disabled = false;
+  els.btnLoadBookmarks.textContent = '读取最近收藏';
+  els.bookmarkList.innerHTML = '';
+
+  if (!resp?.ok) {
+    els.bookmarkHint.className = 'hint is-fail';
+    els.bookmarkHint.textContent = `读取失败：${resp?.error || '未知原因'}`;
+    return;
+  }
+
+  if (!resp.items.length) {
+    els.bookmarkHint.className = 'hint';
+    els.bookmarkHint.textContent = '最近 20 条收藏里没有可抓取的网页，只有文件夹或本地链接。';
+    return;
+  }
+
+  els.bookmarkHint.className = 'hint';
+  els.bookmarkHint.textContent = `共 ${resp.items.length} 条，点任意一条直接消化。`;
+
+  for (const item of resp.items) {
+    const li = el('li', 'row-item');
+    const btn = el('button', 'row-btn');
+    btn.type = 'button';
+    btn.append(
+      el('span', 'row-title', item.title),
+      el('span', 'row-host', item.host || item.url)
+    );
+    btn.addEventListener('click', () => runDigest('url', { url: item.url }));
+    li.append(btn);
+    els.bookmarkList.append(li);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +390,7 @@ async function handleExtract() {
 
 function renderOllamaStatus(status) {
   if (!status) {
+    els.ollamaLabel.textContent = '等待探活…';
     els.ollamaDetail.textContent = '等待探活…';
     return;
   }
@@ -105,29 +398,24 @@ function renderOllamaStatus(status) {
   if (status.ok) {
     els.ollamaDot.className = 'dot dot-ok';
     els.ollamaLabel.textContent = `${status.models.length} 个模型`;
-
-    els.ollamaDetail.className = 'hint is-ok';
+    els.ollamaDetail.className = 'details-note is-ok';
     els.ollamaDetail.textContent = `已连接 · ${status.elapsedMs} ms`;
 
     els.modelList.innerHTML = '';
     for (const m of status.models) {
-      const li = document.createElement('li');
-
-      const name = document.createElement('span');
-      name.className = 'model-name';
-      name.textContent = m.name;
-
-      const meta = document.createElement('span');
-      meta.className = 'model-meta';
-      meta.textContent = [
-        m.parameterSize,
-        m.quantization,
-        m.contextLength ? `${m.contextLength} ctx` : ''
-      ]
-        .filter(Boolean)
-        .join(' · ');
-
-      li.append(name, meta);
+      const li = el('li', 'row-item');
+      const box = el('div', 'row-static');
+      box.append(
+        el('span', 'row-title', m.name),
+        el(
+          'span',
+          'row-host',
+          [m.parameterSize, m.quantization, m.contextLength ? `${m.contextLength} ctx` : '']
+            .filter(Boolean)
+            .join(' · ')
+        )
+      );
+      li.append(box);
       els.modelList.append(li);
     }
     return;
@@ -135,15 +423,12 @@ function renderOllamaStatus(status) {
 
   els.ollamaDot.className = 'dot dot-fail';
   els.ollamaLabel.textContent = '未连接';
+  els.ollamaDetail.className = 'details-note is-fail';
   els.modelList.innerHTML = '';
 
-  els.ollamaDetail.className = 'hint is-fail';
-  els.ollamaDetail.textContent = [
-    `连接失败：${status.error || '未知原因'}`,
-    status.hint || ''
-  ]
+  els.ollamaDetail.textContent = [`连接失败：${status.error || '未知原因'}`, status.hint || '']
     .filter(Boolean)
-    .join('\n');
+    .join(' ');
 }
 
 async function checkOllama() {
@@ -151,12 +436,14 @@ async function checkOllama() {
   els.ollamaDot.className = 'dot dot-idle';
   els.ollamaLabel.textContent = '检测中…';
 
+  let status;
   try {
-    renderOllamaStatus(await send('PING_OLLAMA'));
+    status = await send('PING_OLLAMA');
   } catch (err) {
-    renderOllamaStatus({ ok: false, error: err.message });
+    status = { ok: false, error: err.message };
   }
 
+  renderOllamaStatus(status);
   els.btnRecheck.disabled = false;
 }
 
@@ -164,15 +451,37 @@ async function checkOllama() {
 // 启动
 // ---------------------------------------------------------------------------
 
+async function restoreLastDigest() {
+  try {
+    const resp = await send('GET_LAST_DIGEST');
+    if (resp?.ok && resp.digest) renderResult(resp.digest);
+  } catch {
+    // 还原失败不影响使用，忽略
+  }
+}
+
 async function init() {
   // 先渲染上次的探活结果，避免侧栏重开时一片空白
   const { ollamaStatus } = await chrome.storage.local.get('ollamaStatus');
   renderOllamaStatus(ollamaStatus);
 
   await refreshActiveTab();
+  await restoreLastDigest();
   await checkOllama();
 
+  els.inputTabs.addEventListener('click', (event) => {
+    const tab = event.target.closest('.tab');
+    if (tab) switchPane(tab.dataset.pane);
+  });
+
+  els.btnDigestUrl.addEventListener('click', handleDigestUrl);
+  els.urlInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') handleDigestUrl();
+  });
+
+  els.btnDigestCurrent.addEventListener('click', () => runDigest('current'));
   els.btnExtract.addEventListener('click', handleExtract);
+  els.btnLoadBookmarks.addEventListener('click', handleLoadBookmarks);
   els.btnRecheck.addEventListener('click', checkOllama);
 
   // 切标签页 / 页面跳转时同步当前页信息

@@ -101,8 +101,25 @@ git ls-remote --heads gitee main   # 两行哈希应与 git rev-parse HEAD 相�
 
 ## 六、当前阶段
 
-**阶段 0 · 脚手架**（完成即停等验证）。
+**阶段 1 · 最小闭环**（代码完成，等浏览器验收）。
 
-验收标准：侧栏显示当前页 URL + 标题；Ollama 探活返回模型列表。
+验收标准：粘贴一个链接，侧栏渲染出合法 JSON 的摘要 + 3 个观点。
 
 阶段划分与验收标准见 `README.md` 的阶段进度表。
+
+### 阶段 1 已落地的结构
+
+```
+shared/prompt.json           prompt 模板 + 调用参数（唯一来源）
+shared/output-schema.json    输出结构与校验规则（唯一来源）
+src/background/shared.js     加载 shared/、模板渲染、结构校验
+src/background/llm.js        Ollama 探活与 /api/chat
+src/background/digest.js     消化流水线（解析 → 校验 → 重试 → trace）
+src/background/page.js       标签页与抓正文
+src/background/service-worker.js  消息路由 + 落 storage
+```
+
+**改 prompt / 模型参数 / 校验规则，一律改 `shared/` 下的 JSON，不要写进 JS。**
+阶段 3 的 Python 评测脚本会读同一份文件 —— 两边必须对同一份 JSON 解释一致。
+
+`attempts[]` 里每次尝试的原始输出与错误原因是阶段 3 失败分类的唯一数据来源，**不要为了省空间把它删掉**。

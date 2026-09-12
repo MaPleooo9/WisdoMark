@@ -22,38 +22,81 @@
     </header>
 
     <main class="main">
-      <!-- 当前页面 -->
+      <!-- 输入 -->
       <section class="card">
-        <h2 class="card-title">当前页面</h2>
-
-        <div class="field">
-          <span class="field-label">标题</span>
-          <p class="field-value" id="page-title">—</p>
+        <div class="tabs" id="input-tabs">
+          <button class="tab is-active" type="button" data-pane="paste">粘贴链接</button>
+          <button class="tab" type="button" data-pane="bookmarks">最近收藏</button>
+          <button class="tab" type="button" data-pane="current">当前页面</button>
         </div>
 
-        <div class="field">
-          <span class="field-label">URL</span>
-          <p class="field-value field-url" id="page-url">—</p>
+        <div class="pane" id="pane-paste">
+          <input
+            class="input"
+            id="url-input"
+            type="text"
+            placeholder="粘贴链接，如 https://…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="btn" id="btn-digest-url" type="button">开始消化</button>
+          <p class="hint">留空则消化当前页面。会新开一个后台标签页读正文，读完自动关掉。</p>
         </div>
 
-        <button class="btn" id="btn-extract" type="button">抓取正文</button>
-        <p class="hint" id="extract-result">尚未抓取</p>
+        <div class="pane is-hidden" id="pane-bookmarks">
+          <button class="btn btn-ghost" id="btn-load-bookmarks" type="button">读取最近收藏</button>
+          <ul class="row-list" id="bookmark-list"></ul>
+          <p class="hint" id="bookmark-hint">点任意一条即可直接消化。</p>
+        </div>
+
+        <div class="pane is-hidden" id="pane-current">
+          <div class="field">
+            <span class="field-label">标题</span>
+            <p class="field-value" id="page-title">—</p>
+          </div>
+
+          <div class="field">
+            <span class="field-label">URL</span>
+            <p class="field-value field-url" id="page-url">—</p>
+          </div>
+
+          <button class="btn" id="btn-digest-current" type="button">消化当前页面</button>
+          <button class="btn btn-ghost" id="btn-extract" type="button">只抓正文（调试）</button>
+          <p class="hint" id="extract-result">尚未抓取</p>
+        </div>
+
+        <p class="hint run-status is-hidden" id="run-status"></p>
       </section>
 
-      <!-- 本地模型 -->
-      <section class="card">
-        <h2 class="card-title">本地模型</h2>
-        <p class="hint" id="ollama-detail">等待探活…</p>
-        <ul class="model-list" id="model-list"></ul>
+      <!-- 消化结果 -->
+      <section class="card is-hidden" id="result-card">
+        <h2 class="card-title">消化结果</h2>
+        <p class="result-source" id="result-source">—</p>
+        <div id="result-body"></div>
+        <p class="hint" id="result-meta"></p>
+
+        <details class="raw is-hidden" id="result-raw-wrap">
+          <summary>原始输出与重试明细</summary>
+          <pre class="raw-pre" id="result-raw"></pre>
+        </details>
+      </section>
+
+      <!-- 本地模型（默认折叠，省空间） -->
+      <details class="card details-card" id="model-card">
+        <summary class="details-summary">
+          <span class="details-title">本地模型</span>
+          <span class="details-note" id="ollama-detail">等待探活…</span>
+        </summary>
+        <ul class="row-list" id="model-list"></ul>
         <button class="btn btn-ghost" id="btn-recheck" type="button">重新探活</button>
-      </section>
+      </details>
     </main>
 
     <footer class="footer">
       <span>Wisey · 本地运行，零云端</span>
-      <span class="badge" id="stage-badge">阶段 0</span>
+      <span class="badge" id="stage-badge">阶段 1</span>
     </footer>
 
-    <script src="sidepanel.js"></script>
+    <script type="module" src="sidepanel.js"></script>
   </body>
 </html>
