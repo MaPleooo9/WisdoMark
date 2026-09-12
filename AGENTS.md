@@ -25,7 +25,8 @@
 | 部署 | 暂不部署，走本地交付（README + 录屏 + 开源仓库即展示物） |
 | 参考项目 Karakeep | **只读设计，禁止复制源码**（AGPL 传染条款） |
 | 内容源 | 只做**网页文章**；B 站字幕需 cookie + 接口已停更，**暂缓** |
-| 抓正文路径 | **当前页注入**（activeTab + `chrome.scripting` 按需注入，不申请 `<all_urls>`） |
+| 抓正文路径 | **当前页注入**：`chrome.scripting` 运行时注入 content script，抓到 DOM 后再解析 |
+| 主机权限 | `host_permissions` 含 `*://*/*`（见下方说明，`activeTab` 已证明不可靠） |
 | 评测与插件的关系 | **单一来源**：prompt / 分类体系 / 校验规则放 `shared/`，插件与 Python 脚本读同一份；Python 只做批量调用 + 打分，不重写业务逻辑 |
 | 抓正文实现 | 阶段 1 用原生 DOM 提取；Readability 后续再评估 |
 | 模型 | 本地 `qwen3:8b` 起步 |
@@ -65,7 +66,24 @@ git ls-remote --heads gitee main   # 两行哈希应与 git rev-parse HEAD 相�
 
 - **原生 JS 起步，暂不引入构建工具**；先跑通再工程化。
 - `service worker` 会被浏览器随时回收 —— **状态一律落 `chrome.storage`，不要依赖内存变量跨事件存活**。
-- 权限最小化：`activeTab` + `scripting` 按需注入，而非静态 `content_scripts` + `<all_urls>`。
+- 权限最小化：用 `scripting` **运行时按需注入**，不写静态 `content_scripts`。
+  但 **`host_permissions` 必须含 `*://*/*`**，不能只靠 `activeTab` —— 原因见下节。
+
+### 为什么必须放 `*://*/*`，不能靠 `activeTab`
+
+阶段 0 实测踩到：侧栏点「抓取正文」报
+`Cannot access contents of url "..." Extension manifest must request permission to access this host`。
+
+根因两条，都是结构性的，不是配置笔误：
+
+1. **`activeTab` 是"一次性"授权**：只在用户点扩展图标那一刻授予，且扩展 UI 常驻时第二次调用就失效。侧栏恰恰是常驻 UI，用户何时点抓取不可预测 —— 这个组合天生不稳。
+2. **`activeTab` 覆盖不到"收藏夹里的链接"**：那根本不是当前标签页。阶段 1 的核心输入就是收藏链接，`activeTab` 从设计上就用不上。
+
+**结论**：`host_permissions` 必须包含 `*://*/*`。
+
+**后续可选的工程化方向**（未做，别当成已完成）：改成 `optional_host_permissions` + `chrome.permissions.request()`，
+由侧栏按钮手势触发按需申请。好处是安装时不显示「读取所有网站数据」，权限叙事更干净；
+代价是引入「未授权 / 已授权 / 被拒」三态 UI。留到阶段 4 打磨期再评估。
 - Ollama 调用统一走 service worker，侧栏只通过 `chrome.runtime.sendMessage` 通信。
 - 结构化输出：Ollama `format: json` + 解析校验 + 失败重试（有次数上限）。
 

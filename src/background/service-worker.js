@@ -100,7 +100,7 @@ function isInjectable(url) {
 // 抓正文（阶段 1 起步版）
 //
 // 采用「当前页注入」方案（已拍板）：
-//   1. 先把 content script 注入当前标签页（配合 activeTab，因此不需要 <all_urls>）
+//   1. 先把 content script 注入目标标签页（授权来自 host_permissions）
 //   2. 再在同一个 isolated world 里调用它暴露的提取函数
 // 两步注入保证重复点击时不会重复定义函数（content script 内部做了幂等判断）。
 // ---------------------------------------------------------------------------

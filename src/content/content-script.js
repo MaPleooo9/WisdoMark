@@ -1,7 +1,9 @@
 // WisdoMark · 内容脚本（运行时按需注入）
 //
-// 触发方式：由 service worker 通过 chrome.scripting.executeScript({ files }) 注入，
-// 配合 manifest 里的 activeTab 权限，因此不需要申请 <all_urls>。
+// 触发方式：由 service worker 通过 chrome.scripting.executeScript({ files }) 注入。
+// 注入权限来自 manifest 的 host_permissions（*://*/*）—— 不用 activeTab：
+// 它是「一次性 + 仅当前标签页」的授权，侧栏常驻 UI 反复调用会失败，
+// 且覆盖不到「收藏夹里的链接」这类非当前页目标。
 //
 // 职责边界：只读 DOM，不发任何网络请求，不修改页面。
 // 抓取的正文通过返回值交回 service worker，后续才会送给本地 Ollama。
