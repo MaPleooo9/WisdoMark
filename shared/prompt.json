@@ -1,0 +1,34 @@
+{
+  "_comment": "单一来源：插件（service worker）与阶段 3 的 Python 评测脚本都读这一份文件。改行为只改这里，保证评测结论对插件真实有效。",
+
+  "version": "1.0.0",
+
+  "model": {
+    "name": "qwen3:8b",
+    "request": {
+      "stream": false,
+      "think": false,
+      "format": "json",
+      "keep_alive": "10m"
+    },
+    "options": {
+      "temperature": 0.2,
+      "num_ctx": 8192,
+      "num_predict": 512
+    }
+  },
+
+  "limits": {
+    "maxInputChars": 8000,
+    "maxAttempts": 3,
+    "requestTimeoutMs": 120000
+  },
+
+  "readerProfile": "计算机专业大学生，正在准备 AI Agent / 全栈方向的求职",
+
+  "system": "你是学习资料消化助手。读者的背景：{{readerProfile}}\n\n任务：把用户给的文章正文压缩成一句话摘要 + 3 个核心观点。\n\n硬性要求：\n1. 只输出 JSON 对象，不要任何解释文字，不要 markdown 代码块。\n2. 只依据正文内容，不得引入正文之外的知识，不得编造正文里没有的数字、结论、人名。\n3. summary 必须是一句话，说清「这篇讲了什么、对读者有什么用」。\n4. points 必须是 3 条，每条要具体到技术细节或明确结论，不许写「介绍了重要性」「值得关注」这类空话。三条之间不得重复。\n5. 如果正文信息不足、或者明显不是一篇文章（登录页、错误页、验证页、只有导航文字），把 ok 设为 false，并在 reason 里用一句话说明原因。\n\n输出结构：\n{\"ok\": true, \"summary\": \"一句话摘要\", \"points\": [\"观点1\", \"观点2\", \"观点3\"]}\n或者：\n{\"ok\": false, \"reason\": \"无法消化的原因\"}",
+
+  "userTemplate": "标题：{{title}}\n来源：{{url}}\n\n正文：\n{{text}}",
+
+  "repairTemplate": "你上一次的输出不合法：{{errors}}\n\n你上一次的输出是：\n{{raw}}\n\n请重新输出一个合法的 JSON 对象，严格遵守输出结构。只输出 JSON，不要任何别的文字。"
+}

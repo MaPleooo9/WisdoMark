@@ -1,0 +1,33 @@
+{
+  "_comment": "单一来源：消化结果的结构与校验规则。插件与阶段 3 的 Python 评测脚本共用，Python 侧按同一份规则实现校验（两边对同一份 JSON 解释一致）。",
+
+  "version": "1.0.0",
+
+  "base": {
+    "ok": { "type": "boolean", "required": true }
+  },
+
+  "variants": [
+    {
+      "when": { "ok": true },
+      "fields": {
+        "summary": { "type": "string", "minLen": 8, "maxLen": 160 },
+        "points": {
+          "type": "string[]",
+          "exactLen": 3,
+          "itemMinLen": 6,
+          "itemMaxLen": 120,
+          "uniqueItems": true
+        }
+      }
+    },
+    {
+      "when": { "ok": false },
+      "fields": {
+        "reason": { "type": "string", "minLen": 2, "maxLen": 200 }
+      }
+    }
+  ],
+
+  "_extraFields": "多出来的字段一律丢弃，不报错（8B 模型偶尔会多带一个 confidence 之类的字段，不影响主链路）"
+}
