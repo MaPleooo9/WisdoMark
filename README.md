@@ -18,18 +18,27 @@ WisdoMark 把这个死循环拆掉：插件直接读你的收藏夹，用**本�
 
 ## 安装
 
-> 当前处于**阶段 0（脚手架）**，功能尚未可用，安装步骤供先行验证骨架。
+> 当前处于**阶段 1（最小闭环）**，粘贴链接 / 读收藏 → 摘要 + 3 观点已可用。
 
-**1. 准备本地模型**
+**1. 放行扩展来源（关键，跳过必失败）**
+
+```bash
+setx OLLAMA_ORIGINS "chrome-extension://*"
+```
+
+> `setx` 写入的是**用户级**环境变量，对已运行的进程无效 —— 执行后必须**完全退出 Ollama**（托盘图标右键退出）再重新打开。
+
+**为什么必须做这一步**：Ollama 默认只放行 `localhost` 等来源，`chrome-extension://` 不在白名单里。它拦截的是**带 `Origin` 头**的请求，而浏览器只在跨源语义下才附加这个头 —— 插件探活用的 `GET /api/tags` 是简单请求、不带 Origin，所以显示「已连接」；一旦调模型（`POST` + `application/json`）带上 Origin，就必然被拒。**表现就是「状态灯是绿的，一消化就报 HTTP 403」**，很容易误判成模型或代码问题。
+
+**2. 准备本地模型**
 
 ```bash
 ollama pull qwen3:8b
-ollama serve
 ```
 
 验证：浏览器访问 <http://localhost:11434/api/tags> 应返回模型列表。
 
-**2. 加载插件**
+**3. 加载插件**
 
 > Edge 与 Chrome 都是 Chromium 内核，用同一套 `chrome.*` API，步骤相同。
 
@@ -64,6 +73,17 @@ ollama serve
 
 ---
 
+## 故障排查
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 消化失败，提示 `Ollama 拒绝了扩展来源（HTTP 403）` | Ollama 未放行 `chrome-extension://` | 见「安装」第 1 步；改完环境变量必须**重启 Ollama** |
+| 状态灯不绿、提示连接失败 | Ollama 没启动，或端口被占用 | 启动 Ollama；浏览器访问 <http://localhost:11434/api/tags> 确认 |
+| 抓到的字数为个位数 | 正文由 JS 渲染，初始 DOM 里没有；或站点要求登录 | 属于已知限制（见 `AGENTS.md`）。打开侧栏 DevTools 看注入日志 |
+| 后台标签页没自动关掉 | 页面加载超过 25 秒超时 | **是故意的**，方便你看到底加载出了什么，手动关掉即可 |
+
+---
+
 ## 阶段进度
 
 | 阶段 | 内容 | 状态 |
@@ -93,12 +113,22 @@ ollama serve
 ## 目录结构
 
 ```
-manifest.json                 MV3 清单
+manifest.json                    MV3 清单
+shared/                          插件与评测脚本的单一来源
+  prompt.json                      prompt 模板 + 模型参数
+  output-schema.json               输出结构与校验规则
 src/
-  background/service-worker.js  业务逻辑 + 调 Ollama + 状态持久化
-  content/content-script.js     按需注入，只读 DOM 抓正文
-  sidepanel/                    侧栏界面（html / css / js）
+  background/                    service worker（ES module）
+    service-worker.js               消息路由
+    shared.js                       加载 shared/、模板渲染、按 schema 校验
+    llm.js                          Ollama 探活与调用（含错误分型）
+    page.js                         抓正文（当前页 / 后台标签页）
+    digest.js                       消化流水线：解析 → 校验 → 重试 → trace
+  content/content-script.js      按需注入，只读 DOM 抓正文
+  sidepanel/                     侧栏界面（html / css / js）
 ```
+
+`shared/` 是刻意的设计：prompt、调用参数、输出校验规则都只存一份 JSON，**插件和阶段 3 的 Python 评测脚本读同一份**。否则两套实现会让评测分数失去意义——分数只代表那个 Python 脚本，不代表插件。
 
 ---
 

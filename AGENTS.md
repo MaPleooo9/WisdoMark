@@ -62,6 +62,37 @@ git ls-remote --heads gitee main   # 两行哈希应与 git rev-parse HEAD 相�
 
 ---
 
+### 运行前置：`OLLAMA_ORIGINS` 必须放行扩展来源
+
+阶段 1 实测踩到：插件状态灯是绿的（探活成功），一消化就报 `HTTP 403`，5ms 返回、模型根本没被调用。
+
+根因是 Ollama 的 **Origin 白名单**，不是插件代码问题：
+
+| 事实 | 说明 |
+|---|---|
+| Ollama 默认只放行 `localhost` / `127.0.0.1` 等来源 | `chrome-extension://` 不在其中 |
+| 它拦的是**带 `Origin` 头**的请求 | 实测：`GET /api/tags` 不带 Origin → 200；带 Origin → 403 |
+| 探活为什么能过 | 扩展发的 GET 是「简单请求」，浏览器不附加 Origin |
+| 调模型为什么必挂 | `POST` + `Content-Type: application/json` 触发跨源语义，浏览器附上 Origin → 403 |
+
+**表现具有欺骗性：状态灯绿 + 一用就失败**，极易误判成模型或代码问题。
+
+解法（一次性环境配置，非代码改动）：
+
+```bash
+setx OLLAMA_ORIGINS "chrome-extension://*"
+# 然后完全退出 Ollama（托盘右键退出）再重新打开
+```
+
+`OLLAMA_ORIGINS` 是**追加**到默认白名单，不会破坏 localhost 访问。
+
+代码侧已做的配合：`src/background/llm.js` 的 `describeHttpFailure()` 会把 403 直接翻译成这句可操作提示，
+不让用户只看到一个裸状态码。**以后新增 Ollama 调用路径时，错误都要过这个函数。**
+
+> 备选方案（未采用，仅记录）：用 `declarativeNetRequest` 删掉请求的 `Origin` 头可绕开，但需要额外权限且属于钻空子，不如环境变量正规。
+
+---
+
 ## 四、代码约定
 
 - **原生 JS 起步，暂不引入构建工具**；先跑通再工程化。

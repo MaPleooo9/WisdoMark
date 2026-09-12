@@ -5,6 +5,27 @@
 
 export const OLLAMA_BASE = 'http://localhost:11434';
 
+// HTTP 失败的可操作提示。
+//
+// 403 是这套架构最典型的坑，且有很强的欺骗性：Ollama 默认不放行 chrome-extension://
+// 来源，但只带 Origin 头的请求才会被拒。扩展发的 GET /api/tags 是「简单请求」不带
+// Origin，所以探活显示正常；POST /api/chat 带 Content-Type: application/json，会被
+// 判定为跨源请求并附上 Origin，于是必然 403 —— 表现为「探活绿的，一调模型就失败」。
+// 光看状态码无法定位，必须把解法直接写进错误文案。
+const OLLAMA_ORIGINS_HINT =
+  '在启动 Ollama 前设置环境变量 OLLAMA_ORIGINS=chrome-extension://*，' +
+  '然后完全退出 Ollama（托盘图标右键退出）再重新打开。';
+
+function describeHttpFailure(status, body) {
+  if (status === 403) {
+    return `Ollama 拒绝了扩展来源（HTTP 403）。${OLLAMA_ORIGINS_HINT}`;
+  }
+  if (status === 404) {
+    return `Ollama 返回 404，模型名或接口路径可能不对${body ? `：${body.slice(0, 200)}` : ''}`;
+  }
+  return `Ollama 返回 HTTP ${status}${body ? ` — ${body.slice(0, 200)}` : ''}`;
+}
+
 // 探活：GET /api/tags 返回本机已安装的模型列表。
 // 失败最常见两种原因：Ollama 没启动 / 未放行 chrome-extension 来源。
 export async function pingOllama() {
@@ -14,7 +35,12 @@ export async function pingOllama() {
     const resp = await fetch(`${OLLAMA_BASE}/api/tags`, { method: 'GET' });
 
     if (!resp.ok) {
-      return { ok: false, error: `HTTP ${resp.status}`, elapsedMs: Date.now() - startedAt };
+      const body = await resp.text().catch(() => '');
+      return {
+        ok: false,
+        error: describeHttpFailure(resp.status, body),
+        elapsedMs: Date.now() - startedAt
+      };
     }
 
     const data = await resp.json();
@@ -30,7 +56,7 @@ export async function pingOllama() {
     return {
       ok: false,
       error: err?.message || String(err),
-      hint: '请确认 Ollama 已启动；若仍失败，检查 OLLAMA_ORIGINS 是否放行 chrome-extension://',
+      hint: `请确认 Ollama 已启动。若已启动仍失败：${OLLAMA_ORIGINS_HINT}`,
       elapsedMs: Date.now() - startedAt
     };
   }
@@ -66,7 +92,7 @@ export async function chat(messages, modelCfg, { timeoutMs = 120000 } = {}) {
 
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new Error(`Ollama 返回 HTTP ${resp.status}${body ? ` — ${body.slice(0, 200)}` : ''}`);
+      throw new Error(describeHttpFailure(resp.status, body));
     }
 
     const data = await resp.json();
