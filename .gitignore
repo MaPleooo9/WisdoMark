@@ -1,0 +1,31 @@
+# AI 协作工具的本地记忆目录（不入公开仓库）
+.workbuddy/
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+*.zip
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# 日志
+*.log
+npm-debug.log*
+
+# Python（阶段 3 评测脚本用）
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# 评测产物与本地快照（含正文素材，不入库）
+eval/results/
+eval/snapshots/*.txt
+*.local.json

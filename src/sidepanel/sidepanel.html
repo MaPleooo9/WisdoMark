@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WisdoMark</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark">W</span>
+        <div class="brand-text">
+          <h1 class="brand-name">WisdoMark</h1>
+          <p class="brand-sub">收藏消化助手</p>
+        </div>
+      </div>
+
+      <div class="status" id="ollama-status" title="本地 Ollama 连接状态">
+        <span class="dot dot-idle" id="ollama-dot"></span>
+        <span id="ollama-label">检测中…</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 当前页面 -->
+      <section class="card">
+        <h2 class="card-title">当前页面</h2>
+
+        <div class="field">
+          <span class="field-label">标题</span>
+          <p class="field-value" id="page-title">—</p>
+        </div>
+
+        <div class="field">
+          <span class="field-label">URL</span>
+          <p class="field-value field-url" id="page-url">—</p>
+        </div>
+
+        <button class="btn" id="btn-extract" type="button">抓取正文</button>
+        <p class="hint" id="extract-result">尚未抓取</p>
+      </section>
+
+      <!-- 本地模型 -->
+      <section class="card">
+        <h2 class="card-title">本地模型</h2>
+        <p class="hint" id="ollama-detail">等待探活…</p>
+        <ul class="model-list" id="model-list"></ul>
+        <button class="btn btn-ghost" id="btn-recheck" type="button">重新探活</button>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Wisey · 本地运行，零云端</span>
+      <span class="badge" id="stage-badge">阶段 0</span>
+    </footer>
+
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
