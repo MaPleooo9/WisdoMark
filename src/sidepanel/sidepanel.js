@@ -3,6 +3,8 @@
 // 侧栏随时可能被关闭重开，所以不依赖内存状态：
 // 需要留存的内容一律落 chrome.storage，重开时先渲染缓存再刷新。
 
+import { recognizeImages, mergeWithDocument } from './ocr.js';
+
 const els = {
   // 消息 / 状态
   ollamaDot: document.getElementById('ollama-dot'),
@@ -78,19 +80,28 @@ function hostOf(url) {
 
 // 消化要 5~15 秒，不给反馈用户会以为卡死。显示一个走秒的计时器。
 let ticker = null;
+let runLabel = '';
 
 function startRunStatus(label) {
   const startedAt = Date.now();
 
+  runLabel = label;
+
   const paint = () => {
     const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-    els.runStatus.textContent = `${label}… 已用 ${seconds} 秒`;
+    els.runStatus.textContent = `${runLabel}… 已用 ${seconds} 秒`;
   };
 
   setHidden(els.runStatus, false);
   paint();
   stopRunStatus();
   ticker = setInterval(paint, 100);
+}
+
+// 长流程（抓取 → OCR → 调模型）要能换文案，否则用户看到「正在打开链接」走了 10 秒
+// 会以为卡住了
+function setRunLabel(label) {
+  runLabel = label;
 }
 
 function stopRunStatus() {
@@ -134,6 +145,33 @@ function switchPane(name) {
   for (const [key, pane] of Object.entries(els.panes)) {
     setHidden(pane, key !== name);
   }
+}
+
+// 「点进去就全选」：粘下一条链接时不用先 Ctrl+A 把上一条清掉。
+// 只在「获得焦点」那一次全选 —— 已经聚焦后再点一下，用户是想把光标挪到中间改字，
+// 这时候再抢着全选会让人没法编辑。
+let selectAllOnMouseUp = false;
+
+function wireUrlInput() {
+  els.urlInput.addEventListener('focus', () => {
+    els.urlInput.select();
+    selectAllOnMouseUp = true;
+  });
+
+  els.urlInput.addEventListener('mouseup', (event) => {
+    if (!selectAllOnMouseUp) return;
+    // 浏览器在 mouseup 时才真正落下光标位置，这里挡掉它，保住全选
+    event.preventDefault();
+    selectAllOnMouseUp = false;
+  });
+
+  els.urlInput.addEventListener('blur', () => {
+    selectAllOnMouseUp = false;
+  });
+
+  els.urlInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') handleDigestUrl();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -208,11 +246,81 @@ async function runDigest(kind, payload) {
       : await send('DIGEST_URL', payload);
   } catch (err) {
     resp = { ok: false, error: err.message };
-  } finally {
-    setBusy(false);
   }
 
+  // 图文帖：抓到的文字太少，干货在图里。后台不调模型，先把图片清单交过来，
+  // 由侧栏做本地 OCR，拼进正文后再让模型消化一次。
+  if (resp?.needOcr) {
+    resp = await digestWithOcr(resp.ocr);
+  }
+
+  setBusy(false);
   renderResult(resp, kind === 'current' ? 'current' : 'url');
+}
+
+// 「正文 + 图片文字」合成一份稿子再消化。
+// 这一步不重新抓页面 —— 抓一次要等渲染、还可能撞上登录墙，
+// 而正文和图片 URL 在第一次抓取时就已经拿到了。
+async function digestWithOcr(ocr) {
+  const images = ocr?.images || [];
+
+  let recognized;
+  try {
+    recognized = await recognizeImages(images, {
+      domText: ocr?.text || '',
+      onProgress: ({ stage, index, total }) => {
+        setRunLabel(
+          stage === 'engine'
+            ? '正文在图里，正在启动本地 OCR'
+            : `正在识别图片里的文字 ${index}/${total}`
+        );
+      }
+    });
+  } catch (err) {
+    recognized = { ok: false, error: err?.message || String(err) };
+  }
+
+  // 一张都没认出可用文字：如实说「没抓到正文」，不要硬着头皮把 1118 字开场白送去总结 ——
+  // 那正是用户抱怨「这个网站就不太行」的样子：有结果，但全是废话。
+  if (!recognized?.ok || !recognized.text) {
+    return {
+      ok: true,
+      value: {
+        ok: false,
+        reason:
+          recognized?.error ||
+          `正文只有 ${ocr?.text?.length || 0} 字，${images.length} 张图片也没能识别出可用文字`
+      },
+      source: { title: ocr?.title, url: ocr?.url, charCount: ocr?.text?.length || 0 },
+      extract: {
+        lowContent: true,
+        foregroundFallback: !!ocr?.foregroundFallback,
+        minChars: ocr?.minChars || null
+      },
+      ocrAttempted: images.length
+    };
+  }
+
+  setRunLabel('图片文字已识别，正在调用本地模型');
+
+  const merged = mergeWithDocument(ocr?.text || '', recognized.text);
+
+  return send('DIGEST_TEXT', {
+    text: merged,
+    title: ocr?.title,
+    url: ocr?.url,
+    source: ocr?.source,
+    ocr: {
+      used: true,
+      minChars: ocr?.minChars || null,
+      total: images.length,
+      imageTotal: ocr?.imageTotal || images.length,
+      recognized: recognized.items.length,
+      dropped: recognized.dropped,
+      chars: recognized.chars,
+      model: recognized.model
+    }
+  }).catch((err) => ({ ok: false, error: err.message }));
 }
 
 function handleDigestUrl() {
@@ -264,6 +372,11 @@ function renderResult(resp, origin) {
           '这个页面的正文是切到前台之后才渲染出来的 —— 后台标签页会被浏览器节流，靠滚动才加载的内容不出来。'
         )
       );
+    }
+
+    // 图文帖的账要露出来：摘要突然有内容了，用户得知道是因为多喂了图片里的文字
+    if (resp.ocr?.used) {
+      els.resultBody.append(el('p', 'hint', buildOcrNote(resp.ocr)));
     }
   } else if (extract?.lowContent) {
     // 抓取阶段就没拿到正文。和「模型认为它不是内容主体」是两回事，
@@ -317,8 +430,28 @@ function renderLowContentNotice(resp) {
   const chars = resp?.source?.charCount || 0;
 
   const box = el('div', 'notice');
+  box.append(el('p', 'notice-title', '这个页面没抓到正文'));
+
+  // 图文帖走了 OCR 还是没结果 —— 这是另一种情况，不能和「页面没渲染出来」混为一谈：
+  // 页面明明渲染好了，是图里的字没被认出来，用户要做的也不是「切到前台重试」。
+  if (resp?.ocrAttempted) {
+    box.append(
+      el(
+        'p',
+        'notice-body',
+        `正文只有 ${chars} 字，${resp.ocrAttempted} 张图片也都没能识别出可用文字。常见的两种：图是艺术字标题 / 纯装饰图，或者图里的字太小太花。`
+      ),
+      el(
+        'p',
+        'hint',
+        '这种情况下没有可总结的实质内容 —— 与其让模型拿开场白编一份摘要，不如直说没抓到。'
+      )
+    );
+    els.resultBody.append(box);
+    return;
+  }
+
   box.append(
-    el('p', 'notice-title', '这个页面没抓到正文'),
     el(
       'p',
       'notice-body',
@@ -339,6 +472,24 @@ function renderLowContentNotice(resp) {
   );
 
   els.resultBody.append(box);
+}
+
+// OCR 的账：看了几张、认出几张、补了多少字。
+// 这三件事用户都该知道 —— 摘要质量突然变好或变差，原因就在这里。
+function buildOcrNote(ocr) {
+  const parts = [`这一页的正文在图里：${ocr.total} 张图识别出 ${ocr.recognized} 张，补进 ${ocr.chars} 字`];
+
+  if (ocr.dropped) {
+    parts.push(`${ocr.dropped} 张没认出可用文字（多是封面艺术字或装饰图）`);
+  }
+
+  // 图太多时只识别了前一部分，摘要漏掉后半篇的话得有个说法
+  const skipped = (ocr.imageTotal || ocr.total) - ocr.total;
+  if (skipped > 0) {
+    parts.push(`另有 ${skipped} 张没识别（一页最多识别 ${ocr.total} 张，识别一张约 1.5 秒）`);
+  }
+
+  return `${parts.join('，')}。`;
 }
 
 // 分类徽标。分类名是中文，不能直接当 class 用，所以走 data-category 让 CSS 选。
@@ -555,9 +706,7 @@ async function init() {
   });
 
   els.btnDigestUrl.addEventListener('click', handleDigestUrl);
-  els.urlInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') handleDigestUrl();
-  });
+  wireUrlInput();
 
   els.btnDigestCurrent.addEventListener('click', () => runDigest('current'));
   els.btnExtract.addEventListener('click', handleExtract);

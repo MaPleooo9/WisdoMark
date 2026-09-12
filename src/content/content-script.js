@@ -31,6 +31,85 @@ if (!window.__wisdomark) {
     '.entry-content', '.markdown-body', '.rich_media_content'
   ];
 
+  // ---------------------------------------------------------------------------
+  // 正文图片（给 OCR 用）
+  //
+  // 图文帖（B 站 opus、小红书笔记、公众号长图）的干货全在图里，文字只有开场白。
+  // 只靠文字抓取，模型看到的就是「大家好，今天我要讲七个阶段」这种没有信息量的空壳。
+  // 这里把正文区的大图挑出来，交给侧栏做离线 OCR。
+  //
+  // 只挑不认：这里不做任何图像处理，也不发请求，图片 URL 直接交回 service worker。
+  // ---------------------------------------------------------------------------
+
+  const MIN_IMG_EDGE = 200; // 短边小于它的多半是头像 / 图标 / 分割线
+  const MAX_IMAGES = 8; // 一页最多识别这么多张，OCR 一张约 1 秒，不设上限会让人等太久
+  // URL 或 class/id 里出现这些词，基本可以判定是站点的装饰性图片
+  const DECORATIVE = /(logo|avatar|icon|banner|sprite|qrcode|emoji|face)/i;
+  const NOISE_ANCESTORS = 'header, nav, aside, footer';
+
+  // 取图片的真实地址。懒加载的图 src 可能是占位符，所以还要翻 data-* 和 srcset。
+  function imageUrl(img) {
+    const candidates = [
+      img.currentSrc,
+      img.src,
+      img.getAttribute('data-src'),
+      img.getAttribute('data-original'),
+      img.getAttribute('data-lazy-src'),
+      img.getAttribute('data-echo')
+    ];
+
+    for (const value of candidates) {
+      if (value && !/^data:/i.test(value)) return new URL(value, location.href).href;
+    }
+
+    const srcset = img.getAttribute('srcset') || img.getAttribute('data-srcset');
+    const first = srcset?.split(',')[0]?.trim().split(/\s+/)[0];
+    if (first && !/^data:/i.test(first)) return new URL(first, location.href).href;
+
+    return '';
+  }
+
+  function isDecorative(img, url) {
+    if (!url || DECORATIVE.test(url)) return true;
+    if (img.closest(NOISE_ANCESTORS)) return true;
+
+    // 往上三层看 class / id：用 getAttribute 而不是 className —— SVG 元素的
+    // className 是对象不是字符串，直接拼接会得到 [object SVGAnimatedString]
+    let node = img;
+    for (let depth = 0; depth < 3 && node; depth += 1) {
+      const marker = `${node.getAttribute?.('class') || ''} ${node.getAttribute?.('id') || ''}`;
+      if (DECORATIVE.test(marker)) return true;
+      node = node.parentElement;
+    }
+
+    return false;
+  }
+
+  function collectImages(root) {
+    const out = [];
+    const seen = new Set();
+
+    for (const img of root.querySelectorAll('img')) {
+      // 懒加载的图没渲染时 naturalWidth 是 0，但外层通常用 CSS 占好了位置，
+      // 所以优先信 getBoundingClientRect
+      const rect = img.getBoundingClientRect();
+      const width = Math.round(rect.width) || img.naturalWidth || 0;
+      const height = Math.round(rect.height) || img.naturalHeight || 0;
+
+      if (width < MIN_IMG_EDGE || height < MIN_IMG_EDGE) continue;
+      // 又宽又扁的是横幅，不是正文图（正文长图的比例不会超过 1:5）
+      if (width / height > 5) continue;
+
+      const url = imageUrl(img);
+      if (isDecorative(img, url) || seen.has(url)) continue;
+
+      seen.add(url);
+      out.push({ url, width, height, alt: (img.alt || '').slice(0, 80) });
+    }
+
+    return out;
+  }
+
   // 用 TreeWalker 收集文本节点。
   // 不用 cloneNode + innerText：节点脱离文档后 innerText 会退化成 textContent，
   // 换行信息全部丢失，拼出来的正文是一整团。
@@ -87,14 +166,21 @@ if (!window.__wisdomark) {
 
   window.__wisdomark = {
     extract() {
-      const text = collectText(pickRoot());
+      const root = pickRoot();
+      const text = collectText(root);
+
+      // 只把前 MAX_IMAGES 张交出去（一张约 1.5 秒，不封顶会让人等到怀疑卡死），
+      // 但真正的总数要一起报上去 —— 摘要漏掉后半篇时，用户得知道是这里截的。
+      const all = collectImages(root);
 
       return {
         ok: true,
         url: location.href,
         title: document.title || '',
         text,
-        charCount: text.length
+        charCount: text.length,
+        images: all.slice(0, MAX_IMAGES),
+        imageTotal: all.length
       };
     }
   };

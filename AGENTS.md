@@ -40,7 +40,7 @@
 | 时间 | 每周可支配 10–15 小时，投递窗口 2026-11-20 起 |
 | 提交 | commit message **一律中文**；**改动不论大小都单独提交并立即推送**，绝不攒批 |
 | 推送后 | `git ls-remote <remote> main` 与本地一致 |
-| 依赖 | 不为了解决问题而装新软件，优先零安装 / 轻依赖；新增依赖须先说明为什么必须加 |
+| 依赖 | 不为了解决问题而装新软件，优先零安装 / 轻依赖；新增依赖须先说明为什么必须加。**唯一的例外是 `vendor/tesseract/`（离线 OCR 引擎）**：它必须离线可用，所以整个引擎随仓库走，用户侧零安装 |
 | 禁止改动 | **不得改动 `D:\PROJECT\NaviRAG` 的任何文件**（只读参考可以） |
 | 语言 | 全中文交流；**代码注释用中文** |
 
@@ -221,10 +221,69 @@ setx OLLAMA_ORIGINS "chrome-extension://*"
 
 ---
 
+### 图文帖：干货在图里，必须上本地 OCR
+
+阶段 2 用户反馈：**B 站动态「这个网站就不太行」**。
+
+排查（无头 Edge + CDP 打开真实页面，注入真实 `content-script.js` 跑 `extract()`，再用真实 prompt 调本地模型）：
+
+| 证据 | 结果 |
+|---|---|
+| 插件实际抓到的正文 | **1118 字**，全是「大家好，今天我要讲七个阶段」这类开场白 |
+| 页面里的图片 | **16 张正经大图**（`opus-para-pic`，596×794 起） |
+| 语义容器命中 | `article` / `main` / `[role=main]` 全为 0 → `pickRoot()` 退回 `document.body` |
+| 模型输出的摘要 | 「分为 Track A（应用大师）和 Track B（建造宗师）两条路径，共 7 个阶段」—— 没说错，但**等于什么都没说** |
+| 图里真正的内容 | 七个阶段怎么分、每阶段学什么用什么工具（aider / LangGraph / MCP / RAG）、Track A/B 各走哪条线 |
+
+结论：**不是模型不行，是它只拿到了开场白。** 这类页面（B 站 opus、小红书笔记、公众号长图）
+的正文是画在图里的，DOM 文字只是引子。
+
+**方案：本地离线 OCR，把图里的字认出来拼进正文再消化。**
+
+| 决策点 | 结论 | 为什么 |
+|---|---|---|
+| 引擎 | Tesseract.js + `chi_sim`（fast），原样放进 `vendor/tesseract/` | 项目承诺「全本地零云端」，不能为了识别几个字去连 CDN；约 5.6 MB |
+| 跑在哪 | **侧栏**（扩展页面） | MV3 的 service worker 起不了 Worker、跑不了 WASM；侧栏同样是扩展页面，有 `host_permissions` 兜底，取跨源图片不受 CORS 限制 |
+| 触发 | 正文 < 2000 字 **且** 正文区 ≥2 张大图 | 正常文章一张图都不识别。实测阮一峰周刊 6194 字 → 完全不触发 |
+| 质量门 | 置信度 <55% 或字数 <8 → 整张丢 | 实测封面艺术字只有 33%（黑字压在带纹理的浅底上，二值化被骗）；流程图 87%、正文截图 90% |
+| 去重 | 识别结果和 DOM 文字重复的丢掉 | 图文帖常把同一段正文再截一张图（实测该帖第 3 张就是） |
+| 上限 | 一页最多 8 张（约 12 秒），拼进正文最多 5000 字 | 识别一张约 1.5 秒。超出的张数在 UI 里明说「另有 N 张没识别」，摘要漏掉后半篇时用户能查到原因 |
+
+**实测效果**（同一篇 B 站动态）：正文 **1118 字 → 4223 字**（8 张图认出 6 张，补进 3068 字），
+摘要从「两条路径」变成能列出每个阶段学什么、用什么工具。
+
+**⚠️ 三个必须照抄的配置**（少一个都跑不起来，且报错信息全部指向错误的方向）：
+
+| 配置 | 不这么写的后果 |
+|---|---|
+| `workerBlobURL: false` | tesseract.js 默认 `new Worker(URL.createObjectURL(blob))`，MV3 的 `script-src 'self'` 不允许 blob: worker。报 `Failed to execute 'importScripts' on 'WorkerGlobalScope'`，且**错误信息里写的是 workerPath 那个文件加载失败** —— 极其容易误判成路径写错，实际是默认参数踩了 CSP |
+| `corePath` 指向具体 `.js` 文件 | 指向目录时 worker 会按浏览器能力拼四个候选名（`relaxedsimd-lstm` / `simd-lstm` / …），只放一个文件必然 404 |
+| `manifest.json` 加 `'wasm-unsafe-eval'` | MV3 默认 CSP 禁止 `WebAssembly.compile` |
+
+另：`tesseract-core-*-lstm.wasm.js` 是 emscripten SINGLE_FILE 构建（wasm 以 base64 内嵌），
+**不需要**再放配套的 `.wasm`（实测删掉后结果不变），省 2.9 MB。
+
+**这是一次「不为了解决问题而装新软件」的例外**：引擎是随仓库走的静态文件，用户侧零安装、零联网。
+
+**回归用例**：
+| 页面 | 期望 |
+|---|---|
+| B 站 opus 图文帖（正文在 16 张图里） | 触发 OCR，抓到的字数显著上升，摘要含具体阶段 |
+| 普通长文（>2000 字） | **不触发** OCR，行为与阶段 1 一致 |
+| 只有装饰图 / 艺术字封面的短页 | 触发 OCR 但全部被质量门丢弃 → 报「没抓到正文」并说明图片也没认出来，**不硬着头皮喂开场白** |
+
+端到端跑法：无头 Edge 加载真实扩展 → 打开真实侧栏页面 → 设 `#url-input` 值 → 点 `#btn-digest-url` → 轮询 `#result-body`。
+走的是 `sidepanel.js / service-worker.js / page.js / content-script.js / ocr.js` 全套代码 + 真实本地模型，脚本放仓库外、跑完即删。
+
+---
+
 ## 四、代码约定
 
 - **原生 JS 起步，暂不引入构建工具**；先跑通再工程化。
 - `service worker` 会被浏览器随时回收 —— **状态一律落 `chrome.storage`，不要依赖内存变量跨事件存活**。
+- **侧栏是扩展页面，可以直接 `import` 仓库里的 ES module**（`sidepanel.js` → `ocr.js` → `vendor/tesseract/*`），
+  重活（WASM / Worker / 长循环）放侧栏，service worker 只做消息路由。
+- `manifest.json` 的 CSP 必须保留 `'wasm-unsafe-eval'` —— 去掉它扩展能装，但 OCR 一起 worker 就挂。
 - 权限最小化：用 `scripting` **运行时按需注入**，不写静态 `content_scripts`。
   但 **`host_permissions` 必须含 `*://*/*`**，不能只靠 `activeTab` —— 原因见下节。
 
@@ -273,6 +332,7 @@ setx OLLAMA_ORIGINS "chrome-extension://*"
 | 2.4 | 批量消化：10~20 条 → 排序 + 本周必看 3 条 | 未开始 |
 | 2.5 | 画像推断：从已消化内容聚合出关注主题 / 学习阶段 | 未开始 |
 | 2.6 | 可行动清单 | 未开始 |
+| 2.7 | 图文帖 OCR：正文在图片里的页面（B 站动态等）先把图里的字认出来再消化 | ✅ 代码完成（端到端已跑通，待浏览器验收） |
 
 阶段 2 的验收标准（任务书）：一批链接（≥5 条）→ 分类 + 摘要 + 观点 + 个性化清单，可搜索。
 
@@ -283,11 +343,14 @@ setx OLLAMA_ORIGINS "chrome-extension://*"
 ```
 shared/prompt.json           prompt 模板 + 调用参数（唯一来源）
 shared/output-schema.json    输出结构与校验规则（唯一来源）
+vendor/tesseract/            离线中文 OCR 引擎（worker + WASM 核心 + 语言包，见其 README）
 src/background/shared.js     加载 shared/、模板渲染、结构校验
 src/background/llm.js        Ollama 探活与 /api/chat
 src/background/digest.js     消化流水线（解析 → 校验 → 重试 → trace）
-src/background/page.js       标签页与抓正文
+src/background/page.js       标签页与抓正文（含图文帖判据）
 src/background/service-worker.js  消息路由 + 落 storage
+src/content/content-script.js     抓正文与正文大图
+src/sidepanel/ocr.js         图片文字识别（跑在侧栏，不占 service worker）
 ```
 
 **改 prompt / 模型参数 / 校验规则，一律改 `shared/` 下的 JSON，不要写进 JS。**

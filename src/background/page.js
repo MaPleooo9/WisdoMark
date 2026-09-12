@@ -24,6 +24,34 @@ const QUIET_MS = 1000; // 正文长度多久不变才算渲染完成
 const STABLE_MAX_WAIT_MS = 10000; // 后台等渲染，最多等这么久
 const FOREGROUND_WAIT_MS = 6000; // 前台兜底再等这么久
 
+// ---------------------------------------------------------------------------
+// 图文帖：什么时候值得动用 OCR
+//
+// 实测 B 站 opus（「零基础 AI Agent 学习路线图」那篇）：DOM 里只有 1118 字，
+// 全是「大家好，今天我要讲七个阶段」这种开场白；真正的干货 —— 七个阶段的划分、
+// Track A / Track B 两条路线、每个阶段要用的工具（aider、LangGraph、MCP、RAG）——
+// 全在 16 张图里。模型只能拿开场白写摘要，写出来当然空洞。
+//
+// 判据刻意保守：只有「正文短 + 正文区大图多」才动手，正常文章一张图都不会去识别。
+// ---------------------------------------------------------------------------
+
+export const OCR_TEXT_THRESHOLD = 2000; // 正文短于这个字数才怀疑是图文帖
+export const OCR_MIN_IMAGES = 2; // 至少这么多张正文大图才值得
+
+export function decideOcr({ text = '', images = [], imageTotal } = {}) {
+  const candidates = Array.isArray(images) ? images : [];
+  const needed = candidates.length >= OCR_MIN_IMAGES && text.length < OCR_TEXT_THRESHOLD;
+
+  return {
+    needed,
+    images: needed ? candidates : [],
+    textChars: text.length,
+    imageCount: candidates.length,
+    // content script 只交回前 N 张，总数另算 —— 摘要漏掉后半篇时要能解释为什么
+    imageTotal: imageTotal ?? candidates.length
+  };
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function isInjectable(url) {
@@ -168,7 +196,12 @@ export async function extractActivePage() {
 
   try {
     const extracted = await extractFromTab(tab.id);
-    return { ...extracted, source: 'active-tab', lowContent: false };
+    return {
+      ...extracted,
+      source: 'active-tab',
+      lowContent: false,
+      ocr: decideOcr(extracted)
+    };
   } catch (err) {
     return { ok: false, error: err?.message || String(err), source: 'active-tab' };
   }
@@ -229,9 +262,11 @@ export async function extractFromUrl(url, { timeoutMs = 25000, minChars = MIN_CO
   }
 
   const lowContent = extracted.text.length < minChars;
-  const diagnostics = { lowContent, foregroundFallback, minChars };
+  const ocr = decideOcr(extracted);
+  const diagnostics = { lowContent, foregroundFallback, minChars, ocr };
 
-  if (lowContent) {
+  // 没抓到正文、也没有图可识别 —— 保留标签页，让用户自己看到底加载出了什么
+  if (lowContent && !ocr.needed) {
     return {
       ...extracted,
       ...diagnostics,
@@ -241,6 +276,7 @@ export async function extractFromUrl(url, { timeoutMs = 25000, minChars = MIN_CO
     };
   }
 
+  // 有图可识别的话标签页不用留：图片 URL 已经拿到，取图是侧栏自己去取的
   await chrome.tabs.remove(tab.id).catch(() => {});
   return { ...extracted, ...diagnostics, source: 'opened-tab' };
 }

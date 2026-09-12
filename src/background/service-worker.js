@@ -65,6 +65,26 @@ function safeHost(url) {
 
 // 跑完流水线后落库。落的是完整结果（含 attempts），侧栏重开能还原，阶段 3 也用得上。
 async function digestAndStore(extracted) {
+  // 图文帖：正文文字太少，干货在图里。这里先不调模型 —— 把图片清单交回侧栏，
+  // 由它做本地 OCR，拼进正文后再走 DIGEST_TEXT 回来。模型只被调用一次。
+  if (extracted.ocr?.needed) {
+    return {
+      ok: true,
+      needOcr: true,
+      ocr: {
+        images: extracted.ocr.images,
+        text: extracted.text,
+        title: extracted.title || '',
+        url: extracted.url || '',
+        source: extracted.source || '',
+        imageTotal: extracted.ocr.imageTotal || extracted.ocr.images.length,
+        lowContent: !!extracted.lowContent,
+        foregroundFallback: !!extracted.foregroundFallback,
+        minChars: extracted.minChars || null
+      }
+    };
+  }
+
   const result = await digestDocument({
     title: extracted.title,
     url: extracted.url,
@@ -92,6 +112,9 @@ async function digestAndStore(extracted) {
       foregroundFallback: !!extracted.foregroundFallback,
       minChars: extracted.minChars || null
     },
+    // OCR 的账要记清楚：识别了几张、丢了几张、补了多少字。
+    // 用户看到摘要变了，得能查到是因为多喂了图片文字。
+    ocr: extracted.ocr || null,
     finishedAt: Date.now()
   };
 
@@ -135,6 +158,29 @@ function normalizeUrl(input) {
   return null;
 }
 
+// 侧栏做完 OCR 之后回来：正文已经是「原正文 + 图片文字」，直接走同一条流水线。
+// 这里不再重新抓一次页面 —— 那会把用户刚等到的 OCR 结果连同样的正文又抓一遍。
+async function digestText({ text, title, url, source, ocr }) {
+  const merged = String(text || '');
+
+  if (!merged.trim()) {
+    return { ok: false, error: '没有可消化的正文' };
+  }
+
+  return digestAndStore({
+    text: merged,
+    charCount: merged.length,
+    title: title || '',
+    url: url || '',
+    source: source || '',
+    minChars: ocr?.minChars || null,
+    // OCR 之后的字数要重新判一次：识别出来的文字如果够长，
+    // 就不该再报「这个页面没抓到正文」
+    lowContent: ocr?.minChars ? merged.length < ocr.minChars : false,
+    ocr: ocr ? { ...ocr, needed: false } : null
+  });
+}
+
 async function getLastDigest() {
   const { lastDigest } = await chrome.storage.local.get('lastDigest');
   return { ok: true, digest: lastDigest || null };
@@ -163,6 +209,7 @@ const HANDLERS = {
   GET_RECENT_BOOKMARKS: getRecentBookmarks,
   DIGEST_ACTIVE_PAGE: digestActivePage,
   DIGEST_URL: digestUrl,
+  DIGEST_TEXT: digestText,
   GET_LAST_DIGEST: getLastDigest
 };
 
