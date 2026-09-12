@@ -43,6 +43,22 @@
 | 禁止改动 | **不得改动 `D:\PROJECT\NaviRAG` 的任何文件**（只读参考可以） |
 | 语言 | 全中文交流；**代码注释用中文** |
 
+### 双远端推送（GitHub + Gitee）
+
+本仓库有 **两个远端**：`github`（MaPleooo9/WisdoMark）与 `gitee`（iKnowuHateme/wisdo-mark）。
+`main` 的上游跟踪只指向其中一个（目前是 `gitee`）。
+
+**因此：`git status` 显示 up to date 只能证明本地与上游那个远端一致，不能证明双端同步。**
+每次改动都要**显式**推两个远端，并以 `git ls-remote` 做校验：
+
+```bash
+git push github main
+git push gitee main
+git ls-remote --heads github main
+git ls-remote --heads gitee main   # 两行哈希应与 git rev-parse HEAD 相同
+```
+
+
 ---
 
 ## 四、代码约定
