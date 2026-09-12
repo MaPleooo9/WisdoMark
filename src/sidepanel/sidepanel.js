@@ -254,11 +254,19 @@ function renderResult(resp, origin) {
       buildPoints(value.points)
     );
   } else {
-    // 模型自己判定「这不是一篇能消化的文章」，属于设计内的护栏，不是报错
+    // 模型判定这一页没有可消化的正文主体（登录页 / 错误页 / 导航页等），
+    // 属于设计内的护栏，不是报错。
+    // 护栏边界收得很紧：内容体裁、主题是否与读者方向相关，都不是判 false 的理由 ——
+    // 曾经因为边界划错，把「应用推荐」「游戏更新公告」这类最该被压缩的内容全拒了。
     const box = el('div', 'notice');
     box.append(
-      el('p', 'notice-title', '模型判定这篇文章无法消化'),
-      el('p', 'notice-body', value.reason || '未给出原因')
+      el('p', 'notice-title', '这一页没有可消化的正文'),
+      el('p', 'notice-body', value.reason || '未给出原因'),
+      el(
+        'p',
+        'hint',
+        '只有登录页、错误页、导航页这类没有正文主体的页面会走到这里；应用推荐、更新公告、教程都会正常消化。'
+      )
     );
     els.resultBody.append(box);
   }

@@ -1,7 +1,9 @@
 {
   "_comment": "单一来源：消化结果的结构与校验规则。插件与阶段 3 的 Python 评测脚本共用，Python 侧按同一份规则实现校验（两边对同一份 JSON 解释一致）。",
 
-  "version": "1.0.0",
+  "version": "1.1.0",
+
+  "_pointsSemantics": "points 的 3 条随内容体裁而定：观点类文章是核心观点，工具推荐类是关键事实，更新公告类是关键变化，教程类是关键步骤，清单类是具体条目。校验只看结构（数量 / 长度 / 去重），不校验语义 —— 语义由 prompt.json 的 system 约束。",
 
   "base": {
     "ok": { "type": "boolean", "required": true }
