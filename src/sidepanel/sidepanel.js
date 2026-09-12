@@ -483,10 +483,14 @@ function buildOcrNote(ocr) {
     parts.push(`${ocr.dropped} 张没认出可用文字（多是封面艺术字或装饰图）`);
   }
 
-  // 图太多时只识别了前一部分，摘要漏掉后半篇的话得有个说法
+  // 两种「没识别」的原因不一样，要分开说，否则用户看到张数对不上会怀疑漏了内容
   const skipped = (ocr.imageTotal || ocr.total) - ocr.total;
   if (skipped > 0) {
-    parts.push(`另有 ${skipped} 张没识别（一页最多识别 ${ocr.total} 张，识别一张约 1.5 秒）`);
+    parts.push(`另有 ${skipped} 张不在正文区，没有送来识别`);
+  }
+
+  if (ocr.stoppedByBudget) {
+    parts.push(`还有 ${ocr.stoppedByBudget} 张没识别（前面认出的字已经够用，继续认只是白等）`);
   }
 
   return `${parts.join('，')}。`;

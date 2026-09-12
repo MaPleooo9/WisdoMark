@@ -42,7 +42,11 @@ if (!window.__wisdomark) {
   // ---------------------------------------------------------------------------
 
   const MIN_IMG_EDGE = 200; // 短边小于它的多半是头像 / 图标 / 分割线
-  const MAX_IMAGES = 8; // 一页最多识别这么多张，OCR 一张约 1 秒，不设上限会让人等太久
+  // 上限 30 是安全阀，防止有人贴几百张图的页面。
+  // 原先是 8，实测那篇 B 站动态有 16 张正文图，只认前 8 张直接丢掉后半篇 ——
+  // 第 9～16 张全是正文（每张 400~540 字，合计 3714 字），摘要因此只讲到 Stage 2。
+  // 16 张全程只要 13 秒且侧栏有进度，等得起；同张数下「漏内容」的代价远大于「多等几秒」。
+  const MAX_IMAGES = 30;
   // URL 或 class/id 里出现这些词，基本可以判定是站点的装饰性图片
   const DECORATIVE = /(logo|avatar|icon|banner|sprite|qrcode|emoji|face)/i;
   const NOISE_ANCESTORS = 'header, nav, aside, footer';

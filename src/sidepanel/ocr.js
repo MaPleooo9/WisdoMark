@@ -24,7 +24,12 @@ import Tesseract from '../../vendor/tesseract/tesseract.esm.min.js';
 // 但 Tesseract 的二值化会被纹理骗到，输出全是乱码。所以置信度必须卡。
 const MIN_CONFIDENCE = 55;
 const MIN_CHARS = 8; // 少于这个字数基本是零碎噪声（页码、水印）
-const MAX_MERGED_CHARS = 5000; // 拼进正文的上限，再多会把原正文挤出模型上下文
+// 拼进正文的上限，再多会把原正文挤出模型上下文。
+// 从 5000 提到 9000：实测那篇 B 站动态的 16 张图一共 6260 字可用文字，
+// 卡在 5000 会把最后两张的内容白白切掉。上限与 prompt.json 的 maxInputChars(12000)
+// 对齐 —— OCR 的触发条件是正文不足 2000 字，所以 9000 + 2000 仍在窗口内。
+const MAX_MERGED_CHARS = 9000;
+const IMAGE_BLOCK_OVERHEAD = 12; // 「【图片 N】\n\n」这一行占的字数
 
 let workerPromise = null;
 
@@ -129,8 +134,16 @@ export async function recognizeImages(images, { domText = '', onProgress } = {})
 
   const items = [];
   let dropped = 0;
+  let usedChars = 0; // 已经装进正文的字数
+  let stoppedByBudget = 0; // 因为额度用满而没识别的张数
 
   for (const [index, image] of images.entries()) {
+    // 额度用满就停手。再识别下去也是被 buildOcrBlock 截掉，白白让用户多等几十秒。
+    if (usedChars >= MAX_MERGED_CHARS) {
+      stoppedByBudget = images.length - index;
+      break;
+    }
+
     report('recognize', index + 1);
 
     try {
@@ -150,6 +163,7 @@ export async function recognizeImages(images, { domText = '', onProgress } = {})
       }
 
       items.push({ url: image.url, text, confidence });
+      usedChars += text.length + IMAGE_BLOCK_OVERHEAD;
     } catch {
       // 单张图取不到 / 解码失败不该毁掉整次消化，记一笔继续
       dropped += 1;
@@ -158,5 +172,13 @@ export async function recognizeImages(images, { domText = '', onProgress } = {})
 
   const text = buildOcrBlock(items);
 
-  return { ok: true, items, dropped, text, chars: text.length, model: 'tesseract chi_sim (fast)' };
+  return {
+    ok: true,
+    items,
+    dropped,
+    stoppedByBudget,
+    text,
+    chars: text.length,
+    model: 'tesseract chi_sim (fast)'
+  };
 }
