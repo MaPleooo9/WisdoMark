@@ -263,7 +263,7 @@ function renderResult(resp, origin) {
     els.resultBody.append(box);
   }
 
-  els.resultMeta.textContent = buildMetaText(meta, attempts, source);
+  els.resultMeta.textContent = buildMetaText(meta, attempts);
 
   const lastAttempt = attempts?.[attempts.length - 1];
   if (lastAttempt?.raw) {
@@ -315,7 +315,7 @@ function renderFailure(resp) {
   }
 }
 
-function buildMetaText(meta, attempts, source) {
+function buildMetaText(meta, attempts) {
   if (!meta) return '';
 
   const parts = [
@@ -324,8 +324,9 @@ function buildMetaText(meta, attempts, source) {
     `共 ${attempts.reduce((sum, a) => sum + (a.elapsedMs || 0), 0)} ms`
   ];
 
+  // 用 meta 里的数字，不依赖 source —— source 会被抓取来源覆盖，meta 才是权威值
   if (meta.truncated) {
-    parts.push(`正文已截断 ${source.originalChars} → ${source.usedChars} 字`);
+    parts.push(`正文已截断 ${meta.originalChars} → ${meta.usedChars} 字`);
   }
 
   if (meta.droppedFields?.length) {

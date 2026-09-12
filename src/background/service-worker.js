@@ -73,7 +73,10 @@ async function digestAndStore(extracted) {
 
   const payload = {
     ...result,
+    // 展开 result.source：它带着截断相关的 originalChars / usedChars，
+    // 直接覆盖会导致 UI 显示「已截断 undefined → undefined 字」
     source: {
+      ...(result.source || {}),
       title: extracted.title || '',
       url: extracted.url || '',
       charCount: extracted.charCount || 0,
