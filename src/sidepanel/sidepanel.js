@@ -592,7 +592,8 @@ async function handleLoadBookmarks() {
 
   if (!resp?.ok) {
     els.bookmarkHint.className = 'hint is-fail';
-    els.bookmarkHint.textContent = `读取失败：${resp?.error || '未知原因'}`;
+    // service-worker 返回的 error 自带「读取收藏夹失败：…」这类前缀，这里不要再叠一层
+    els.bookmarkHint.textContent = resp?.error || '读取失败：未知原因';
     return;
   }
 

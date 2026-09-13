@@ -31,6 +31,18 @@ chrome.sidePanel
 const BOOKMARK_LIMIT = 20;
 
 async function getRecentBookmarks({ limit = BOOKMARK_LIMIT } = {}) {
+  // 没有 bookmarks 权限时 chrome.bookmarks 是 undefined，直接调 getRecent 会抛
+  // 「Cannot read properties of undefined (reading 'getRecent')」—— 用户既看不懂，
+  // 也不知道该做什么。实测：这条权限从阶段 0 起就一直漏着，这个入口从未成功过。
+  if (!chrome.bookmarks?.getRecent) {
+    return {
+      ok: false,
+      error:
+        'WisdoMark 还没有「收藏夹」权限。请到 edge://extensions 重新加载本扩展，' +
+        '重新加载时会请求这个权限，同意后就能读取收藏了。'
+    };
+  }
+
   try {
     // getRecent 返回的是「文件夹 + 书签」混合列表，文件夹没有 url，过滤掉
     const raw = await chrome.bookmarks.getRecent(limit);

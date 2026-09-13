@@ -9,7 +9,8 @@
     "sidePanel",
     "tabs",
     "scripting",
-    "storage"
+    "storage",
+    "bookmarks"
   ],
 
   "host_permissions": [
