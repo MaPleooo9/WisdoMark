@@ -38,6 +38,7 @@ const els = {
   resultSource: document.getElementById('result-source'),
   resultBody: document.getElementById('result-body'),
   resultMeta: document.getElementById('result-meta'),
+  btnCopyResult: document.getElementById('btn-copy-result'),
   resultRawWrap: document.getElementById('result-raw-wrap'),
   resultRaw: document.getElementById('result-raw')
 };
@@ -348,12 +349,84 @@ function handleDigestUrl() {
 // 结果渲染
 // ---------------------------------------------------------------------------
 
+// 最近一次成功的结果，供「复制结果」取内容。
+// 侧栏重开是由 storage 还原的，那条路径也会重新走一遍 renderResult，所以这里只管当前这次。
+let currentResult = null;
+
+// 拼复制出去的文本。刻意不加 Markdown 标记 —— 粘到微信、记事本、聊天框里
+// 「#」「**」只会碍眼；「标题 · 分类」+ 空行 + 编号列表，在哪都读得顺。
+function buildCopyText(result) {
+  const title = result?.source?.title || '';
+  const url = result?.source?.url || '';
+  const { category, summary, points } = result?.value || {};
+
+  const head = [title, category].filter(Boolean).join(' · ');
+  const lines = [];
+
+  if (head) lines.push(head);
+  if (summary) lines.push('', summary);
+
+  if (Array.isArray(points) && points.length) {
+    lines.push('');
+    for (const [index, point] of points.entries()) lines.push(`${index + 1}. ${point}`);
+  }
+
+  if (url) lines.push('', `来源：${url}`);
+
+  return lines.join('\n').trim();
+}
+
+let copyResetTimer = null;
+
+async function handleCopyResult() {
+  const text = currentResult ? buildCopyText(currentResult) : '';
+  if (!text) return;
+
+  let done = true;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // 扩展页面调 navigator.clipboard 需要 clipboardWrite 权限，没声明时会被拒。
+    // 退回到 execCommand —— 它虽已废弃，但只要求当前有用户手势，兼容性反而最稳。
+    done = legacyCopy(text);
+  }
+
+  els.btnCopyResult.textContent = done ? '已复制 ✓' : '复制失败，请手动选中';
+  clearTimeout(copyResetTimer);
+  copyResetTimer = setTimeout(() => {
+    els.btnCopyResult.textContent = '复制结果';
+  }, 1600);
+}
+
+function legacyCopy(text) {
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 function renderResult(resp, origin) {
   els.resultBody.innerHTML = '';
   els.resultBody.className = '';
   els.resultMeta.textContent = '';
   setHidden(els.resultRawWrap, true);
   setHidden(els.resultCard, false);
+
+  // 复制按钮只在出了真实结果时出现 —— 失败提示没什么可复制的。
+  // 顺带把这次的结果留住，供复制时取内容。
+  currentResult = resp?.ok === true && resp?.value?.ok === true ? resp : null;
+  setHidden(els.btnCopyResult, !currentResult);
+  els.btnCopyResult.textContent = '复制结果';
 
   // 落库失败（网络 / 抓取 / 校验耗尽）—— 用抓取到的来源信息兜底显示
   if (!resp || resp.ok !== true) {
@@ -792,6 +865,7 @@ async function init() {
   els.bookmarkFolder.addEventListener('change', () => {
     chrome.storage.local.set({ [FOLDER_STORE_KEY]: els.bookmarkFolder.value }).catch(() => {});
   });
+  els.btnCopyResult.addEventListener('click', handleCopyResult);
   els.btnRecheck.addEventListener('click', checkOllama);
 
   // 切标签页 / 页面跳转时同步当前页信息
