@@ -24,6 +24,7 @@ const els = {
   urlInput: document.getElementById('url-input'),
   btnDigestUrl: document.getElementById('btn-digest-url'),
   btnLoadBookmarks: document.getElementById('btn-load-bookmarks'),
+  bookmarkFolder: document.getElementById('bookmark-folder'),
   bookmarkList: document.getElementById('bookmark-list'),
   bookmarkHint: document.getElementById('bookmark-hint'),
   pageTitle: document.getElementById('page-title'),
@@ -138,12 +139,20 @@ function applyUnsupported(busy) {
 // 输入区标签页
 // ---------------------------------------------------------------------------
 
+let bookmarkFoldersLoaded = false;
+
 function switchPane(name) {
   for (const btn of els.inputTabs.querySelectorAll('.tab')) {
     btn.classList.toggle('is-active', btn.dataset.pane === name);
   }
   for (const [key, pane] of Object.entries(els.panes)) {
     setHidden(pane, key !== name);
+  }
+
+  // 收藏夹列表懒加载 —— 没必要每次打开侧栏都去读一遍收藏夹树
+  if (name === 'bookmarks' && !bookmarkFoldersLoaded) {
+    bookmarkFoldersLoaded = true;
+    loadBookmarkFolders();
   }
 }
 
@@ -574,20 +583,78 @@ function buildMetaText(meta, attempts) {
 // 最近收藏
 // ---------------------------------------------------------------------------
 
+// 下拉里第一项固定是它，代表「跨所有文件夹取最近 N 条」
+const RECENT_VALUE = '__recent';
+// 记住上次选的收藏夹 —— 侧栏关掉重开内存就没了，这类偏好得落 storage
+const FOLDER_STORE_KEY = 'lastBookmarkFolder';
+
+// 把收藏夹树填进下拉框。只在第一次切到这个面板时调用（见 switchPane）。
+async function loadBookmarkFolders() {
+  els.bookmarkFolder.disabled = true;
+
+  let resp;
+  try {
+    resp = await send('GET_BOOKMARK_FOLDERS');
+  } catch (err) {
+    resp = { ok: false, error: err.message };
+  }
+
+  els.bookmarkFolder.disabled = false;
+
+  // 拿不到文件夹不算致命：保留「最近收藏」这一项，真去读的时候会给出明确原因
+  // （多半是没给 bookmarks 权限，service-worker 会返回能照着做的提示）
+  if (!resp?.ok) {
+    els.bookmarkFolder.title = resp?.error || '';
+    return;
+  }
+
+  const stored = await chrome.storage.local.get(FOLDER_STORE_KEY).catch(() => ({}));
+
+  // 只重建后续项，第一项「最近收藏」始终保留
+  els.bookmarkFolder.length = 1;
+
+  for (const folder of resp.folders) {
+    const option = document.createElement('option');
+    option.value = folder.id;
+
+    // 缩进表示层级：侧栏只有三百来像素，塞不下可展开的树控件
+    const indent = '　'.repeat(folder.depth); // 全角空格，比普通空格更稳
+    const scope = folder.direct
+      ? `（${folder.direct} 篇）`
+      : folder.subFolders
+        ? `（含 ${folder.subFolders} 个子文件夹）`
+        : '（空）';
+
+    option.textContent = `${indent}${folder.title}${scope}`;
+    els.bookmarkFolder.append(option);
+  }
+
+  // 上次选的收藏夹可能已经被删掉了，确认还在选项里再恢复
+  const wanted = stored?.[FOLDER_STORE_KEY];
+  if (wanted && [...els.bookmarkFolder.options].some((o) => o.value === wanted)) {
+    els.bookmarkFolder.value = wanted;
+  }
+}
+
 async function handleLoadBookmarks() {
+  const folderId = els.bookmarkFolder.value;
+  const isRecent = folderId === RECENT_VALUE;
+
   els.btnLoadBookmarks.disabled = true;
   els.btnLoadBookmarks.textContent = '读取中…';
   els.bookmarkHint.className = 'hint';
 
   let resp;
   try {
-    resp = await send('GET_RECENT_BOOKMARKS', { limit: 20 });
+    resp = isRecent
+      ? await send('GET_RECENT_BOOKMARKS', { limit: 20 })
+      : await send('GET_BOOKMARKS_IN_FOLDER', { folderId, limit: 50 });
   } catch (err) {
     resp = { ok: false, error: err.message };
   }
 
   els.btnLoadBookmarks.disabled = false;
-  els.btnLoadBookmarks.textContent = '读取最近收藏';
+  els.btnLoadBookmarks.textContent = '读取';
   els.bookmarkList.innerHTML = '';
 
   if (!resp?.ok) {
@@ -599,12 +666,17 @@ async function handleLoadBookmarks() {
 
   if (!resp.items.length) {
     els.bookmarkHint.className = 'hint';
-    els.bookmarkHint.textContent = '最近 20 条收藏里没有可抓取的网页，只有文件夹或本地链接。';
+    els.bookmarkHint.textContent = isRecent
+      ? '最近 20 条收藏里没有可抓取的网页，只有文件夹或本地链接。'
+      : '这个收藏夹里没有可抓取的网页（可能只存了文件夹或本地文件）。';
     return;
   }
 
   els.bookmarkHint.className = 'hint';
-  els.bookmarkHint.textContent = `共 ${resp.items.length} 条，点任意一条直接消化。`;
+  const capped = resp.total > resp.items.length
+    ? `（这个收藏夹共 ${resp.total} 条，先列出最近 ${resp.items.length} 条）`
+    : '';
+  els.bookmarkHint.textContent = `共 ${resp.items.length} 条${capped}，点任意一条直接消化。`;
 
   for (const item of resp.items) {
     const li = el('li', 'row-item');
@@ -716,6 +788,10 @@ async function init() {
   els.btnDigestCurrent.addEventListener('click', () => runDigest('current'));
   els.btnExtract.addEventListener('click', handleExtract);
   els.btnLoadBookmarks.addEventListener('click', handleLoadBookmarks);
+  // 选了哪个收藏夹就记住，下次开侧栏还是它
+  els.bookmarkFolder.addEventListener('change', () => {
+    chrome.storage.local.set({ [FOLDER_STORE_KEY]: els.bookmarkFolder.value }).catch(() => {});
+  });
   els.btnRecheck.addEventListener('click', checkOllama);
 
   // 切标签页 / 页面跳转时同步当前页信息

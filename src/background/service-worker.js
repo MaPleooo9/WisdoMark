@@ -28,36 +28,113 @@ chrome.sidePanel
 // 收藏夹
 // ---------------------------------------------------------------------------
 
-const BOOKMARK_LIMIT = 20;
+const BOOKMARK_LIMIT = 20; // 「最近收藏」取多少条
+const FOLDER_LIMIT = 50; // 单个收藏夹最多列多少条
+
+// 缺 bookmarks 权限时 chrome.bookmarks 是 undefined，调用直接抛
+// 「Cannot read properties of undefined」—— 用户既看不懂，也不知道该做什么。
+// 实测：这条权限从阶段 0 起就一直漏着，这个入口从未成功过。所有收藏夹入口共用这一个判断。
+function bookmarkApiMissing() {
+  return {
+    ok: false,
+    error:
+      'WisdoMark 还没有「收藏夹」权限。请到 edge://extensions 重新加载本扩展，' +
+      '重新加载时会请求这个权限，同意后就能读取收藏了。'
+  };
+}
+
+const hasBookmarkApi = () => !!(chrome.bookmarks && chrome.bookmarks.getTree);
+
+function toItem(bookmark) {
+  return {
+    id: bookmark.id,
+    title: bookmark.title || '(无标题)',
+    url: bookmark.url,
+    host: safeHost(bookmark.url),
+    addedAt: bookmark.dateAdded || null
+  };
+}
 
 async function getRecentBookmarks({ limit = BOOKMARK_LIMIT } = {}) {
-  // 没有 bookmarks 权限时 chrome.bookmarks 是 undefined，直接调 getRecent 会抛
-  // 「Cannot read properties of undefined (reading 'getRecent')」—— 用户既看不懂，
-  // 也不知道该做什么。实测：这条权限从阶段 0 起就一直漏着，这个入口从未成功过。
-  if (!chrome.bookmarks?.getRecent) {
-    return {
-      ok: false,
-      error:
-        'WisdoMark 还没有「收藏夹」权限。请到 edge://extensions 重新加载本扩展，' +
-        '重新加载时会请求这个权限，同意后就能读取收藏了。'
-    };
-  }
+  if (!hasBookmarkApi()) return bookmarkApiMissing();
 
   try {
     // getRecent 返回的是「文件夹 + 书签」混合列表，文件夹没有 url，过滤掉
     const raw = await chrome.bookmarks.getRecent(limit);
-
-    const items = raw
-      .filter((b) => /^https?:\/\//i.test(b.url || ''))
-      .map((b) => ({
-        id: b.id,
-        title: b.title || '(无标题)',
-        url: b.url,
-        host: safeHost(b.url),
-        addedAt: b.dateAdded || null
-      }));
+    const items = raw.filter((b) => /^https?:\/\//i.test(b.url || '')).map(toItem);
 
     return { ok: true, items, limit };
+  } catch (err) {
+    return { ok: false, error: `读取收藏夹失败：${err?.message || err}` };
+  }
+}
+
+// 收藏夹树 → 扁平列表。保留 depth 是给下拉框做缩进用的 ——
+// 侧栏只有三百来像素宽，塞个嵌套展开的树控件不现实，缩进的下拉最省地方。
+async function getBookmarkFolders() {
+  if (!hasBookmarkApi()) return bookmarkApiMissing();
+
+  try {
+    const tree = await chrome.bookmarks.getTree();
+    const folders = [];
+
+    // 根节点自己没有名字（id 就是 '0'），它的 children 才是
+    // 「收藏夹栏 / 其他收藏夹 / 移动设备书签」这三项，要保留
+    const walk = (nodes, depth) => {
+      for (const node of nodes || []) {
+        if (!node.children) continue;
+
+        folders.push({
+          id: node.id,
+          title: (node.title || '').trim() || '(未命名文件夹)',
+          depth,
+          // 让用户在下拉里一眼看出哪些是空文件夹，不必点进去才发现
+          direct: node.children.filter((c) => c.url).length,
+          subFolders: node.children.filter((c) => c.children).length
+        });
+
+        walk(node.children, depth + 1);
+      }
+    };
+
+    // 从根的子节点开始走：根自己（id '0'）没有名字，选它等于「全部收藏」，
+    // 放进下拉只会显示成「(未命名文件夹)」让人摸不着头脑
+    walk(tree[0]?.children || [], 0);
+    return { ok: true, folders };
+  } catch (err) {
+    return { ok: false, error: `读取收藏夹列表失败：${err?.message || err}` };
+  }
+}
+
+// 取某个收藏夹里的网页书签。
+// 刻意连子文件夹一起收：用户选了「技术」，下面分「前端」「后端」，
+// 他要的是「这个分类下的所有文章」，不是「直接躺在这个文件夹里的那几篇」。
+async function getBookmarksInFolder({ folderId, limit = FOLDER_LIMIT } = {}) {
+  if (!hasBookmarkApi()) return bookmarkApiMissing();
+  if (!folderId) return { ok: false, error: '没有指定收藏夹' };
+
+  try {
+    const [root] = await chrome.bookmarks.getSubTree(folderId);
+    if (!root) return { ok: false, error: '这个收藏夹不存在了，可能刚被删掉' };
+
+    const found = [];
+    const collect = (node) => {
+      for (const child of node.children || []) {
+        if (child.children) collect(child);
+        else if (/^https?:\/\//i.test(child.url || '')) found.push(child);
+      }
+    };
+    collect(root);
+
+    // 收藏夹里的自然顺序是「加到哪算哪」，按加入时间倒序更接近「最近想看的」
+    found.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
+
+    return {
+      ok: true,
+      items: found.slice(0, limit).map(toItem),
+      total: found.length,
+      limit
+    };
   } catch (err) {
     return { ok: false, error: `读取收藏夹失败：${err?.message || err}` };
   }
@@ -219,6 +296,8 @@ const HANDLERS = {
   GET_ACTIVE_TAB: getActiveTab,
   EXTRACT_ACTIVE_PAGE: extractActivePage,
   GET_RECENT_BOOKMARKS: getRecentBookmarks,
+  GET_BOOKMARK_FOLDERS: getBookmarkFolders,
+  GET_BOOKMARKS_IN_FOLDER: getBookmarksInFolder,
   DIGEST_ACTIVE_PAGE: digestActivePage,
   DIGEST_URL: digestUrl,
   DIGEST_TEXT: digestText,

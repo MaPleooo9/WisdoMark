@@ -62,6 +62,31 @@ git ls-remote --heads gitee main   # 两行哈希应与 git rev-parse HEAD 相�
 
 ---
 
+### 新增 `chrome.*` API 时必须同步 manifest 权限
+
+实测踩过（2026-09-13）：`getRecentBookmarks()` 调用 `chrome.bookmarks.getRecent`，
+但 manifest 的 `permissions` 从阶段 0 起就只有 `sidePanel / tabs / scripting / storage` ——
+**`bookmarks` 从来没加过**。翻 git 历史确认 8 个提交里这一行没变过，
+也就是说「读取最近收藏」这个入口**从写下那天起就没成功过**，直到用户点它才暴露。
+
+后果的形态值得记住：**缺权限时 `chrome.<api>` 是 `undefined`，不是抛「权限不足」**，
+所以报错会指向一个和权限毫不相干的地方：
+
+```
+读取失败：读取收藏夹失败：Cannot read properties of undefined (reading 'getRecent')
+```
+
+用户既看不懂，也无从下手。规矩：
+
+- 新增任何 `chrome.<api>` 调用，先确认它在 manifest 的 `permissions` / `host_permissions` 里有对应项
+- 调用点自己做存在性判断（`chrome.bookmarks?.getRecent`），缺失时返回**能照着做**的提示
+  （「到 `edge://extensions` 重新加载本扩展」），不要把 undefined 的天书丢给用户
+- 核对办法：`grep -rho "chrome\.[a-zA-Z]*" src/ | sort -u` 与 manifest 的 permissions 对一遍
+- 补权限后必须**升版本号**并让用户重新加载 —— 新增权限时 Edge 会请求一次授权，
+  版本号不变用户无法确认自己加载的是新版本
+
+---
+
 ### 运行前置：`OLLAMA_ORIGINS` 必须放行扩展来源
 
 阶段 1 实测踩到：插件状态灯是绿的（探活成功），一消化就报 `HTTP 403`，5ms 返回、模型根本没被调用。

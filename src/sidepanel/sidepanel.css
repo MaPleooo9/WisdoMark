@@ -234,6 +234,30 @@ body {
   background: var(--card);
 }
 
+/* 收藏夹下拉。跟 .input 同款观感，只多 cursor 与 disabled 态 */
+.select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--card);
+}
+
+.select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .btn {
   width: 100%;
   margin-top: 10px;

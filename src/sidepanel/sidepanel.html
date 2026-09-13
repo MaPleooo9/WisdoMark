@@ -44,9 +44,13 @@
         </div>
 
         <div class="pane is-hidden" id="pane-bookmarks">
-          <button class="btn btn-ghost" id="btn-load-bookmarks" type="button">读取最近收藏</button>
+          <label class="field-label" for="bookmark-folder">从哪个收藏夹读</label>
+          <select class="select" id="bookmark-folder">
+            <option value="__recent">最近收藏（所有文件夹）</option>
+          </select>
+          <button class="btn btn-ghost" id="btn-load-bookmarks" type="button">读取</button>
           <ul class="row-list" id="bookmark-list"></ul>
-          <p class="hint" id="bookmark-hint">点任意一条即可直接消化。</p>
+          <p class="hint" id="bookmark-hint">选好收藏夹后点「读取」，点任意一条即可直接消化。</p>
         </div>
 
         <div class="pane is-hidden" id="pane-current">
@@ -94,7 +98,7 @@
 
     <footer class="footer">
       <span>Wisey · 本地运行，零云端</span>
-      <span class="badge" id="stage-badge">阶段 1</span>
+      <span class="badge" id="stage-badge">阶段 2</span>
     </footer>
 
     <script type="module" src="sidepanel.js"></script>
