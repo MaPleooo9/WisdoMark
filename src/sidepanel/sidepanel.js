@@ -460,6 +460,11 @@ function renderResult(resp, origin) {
     if (resp.ocr?.used) {
       els.resultBody.append(el('p', 'hint', buildOcrNote(resp.ocr)));
     }
+
+    // 归档状态。落库是后面「画像 / 清单 / 搜索」的地基，用户得看得见它在工作；
+    // 同一篇重复消化时更要明说 —— 否则会以为库里又存了一条重复的。
+    const archiveNote = buildArchiveNote(resp.archive);
+    if (archiveNote) els.resultBody.append(el('p', 'hint', archiveNote));
   } else if (extract?.lowContent) {
     // 抓取阶段就没拿到正文。和「模型认为它不是内容主体」是两回事，
     // 混成一句话会让用户完全不知道下一步该干什么。
@@ -596,6 +601,26 @@ function describeLoginWall(reason) {
   };
 
   return reasons[reason] || '页面特征像是登录页';
+}
+
+// 归档状态。新增 / 重复覆盖 / 没存上，三种情况要说不同的话 ——
+// 尤其第二种：不说清楚，用户会以为库里又添了一条重复的。
+function buildArchiveNote(archive) {
+  if (!archive) return '';
+
+  if (archive.error) {
+    return `这次没能归档（${archive.error}）—— 摘要照样能看，但没进本地库。`;
+  }
+
+  if (archive.isNew === false) {
+    return `这篇之前消化过，已更新归档（第 ${archive.digestCount} 次 · 库中 ${archive.total} 篇）。`;
+  }
+
+  if (archive.isNew === true) {
+    return `已归档 · 库中 ${archive.total} 篇。`;
+  }
+
+  return '';
 }
 
 // OCR 的账：看了几张、认出几张、补了多少字。

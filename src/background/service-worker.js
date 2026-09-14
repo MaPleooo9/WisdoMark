@@ -13,6 +13,7 @@
 import { pingOllama } from './llm.js';
 import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
 import { digestDocument } from './digest.js';
+import { saveDigest, countDigests, listDigests } from './store.js';
 
 // ---------------------------------------------------------------------------
 // 侧栏行为
@@ -210,8 +211,41 @@ async function digestAndStore(extracted) {
     finishedAt: Date.now()
   };
 
+  // 归档进 IndexedDB（阶段 2.2）。这是后面「批量消化 / 画像推断 /
+  // 可行动清单 / 归档搜索」的共同地基 —— 没有历史记录，那四项都无处落脚。
+  //
+  // 归档失败不能让整次消化看起来失败：结果已经在手上，照样给用户，
+  // 只在 UI 上说明这次没存上。所以这里自己吞异常，不往外抛。
+  payload.archive = await archiveResult(result, payload);
+
   await chrome.storage.local.set({ lastDigest: payload });
   return payload;
+}
+
+// 一次消化 → 一条归档记录。返回给 UI 的元信息：是不是新的、第几次、库里共几篇。
+async function archiveResult(result, payload) {
+  // 模型判定「没有可消化正文」的不入档 —— 存进去只会污染后面的画像
+  if (result?.value?.ok !== true) return null;
+
+  try {
+    const saved = await saveDigest({
+      url: payload.source.url,
+      title: payload.source.title,
+      category: result.value.category,
+      summary: result.value.summary,
+      points: result.value.points,
+      charCount: payload.source.charCount,
+      model: result.meta?.model || '',
+      attempts: Array.isArray(result.attempts) ? result.attempts.length : 0,
+      ocr: payload.ocr || null
+    });
+
+    if (!saved.ok) return { error: saved.error };
+
+    return { isNew: saved.isNew, digestCount: saved.digestCount, total: saved.total };
+  } catch (err) {
+    return { error: err?.message || String(err) };
+  }
 }
 
 async function digestActivePage() {
@@ -278,6 +312,31 @@ async function getLastDigest() {
   return { ok: true, digest: lastDigest || null };
 }
 
+// 归档库概况。侧栏用来看「落库这件事到底有没有在工作」，
+// 阶段 2.3 的归档面板和 2.4 的批量消化也从这里取数据。
+async function getArchiveStats() {
+  try {
+    const [total, latest] = await Promise.all([countDigests(), listDigests({ limit: 1 })]);
+
+    const head = latest?.[0] || null;
+    return {
+      ok: true,
+      total,
+      latest: head
+        ? {
+            title: head.title,
+            url: head.url,
+            category: head.category,
+            digestedAt: head.digestedAt,
+            digestCount: head.digestCount
+          }
+        : null
+    };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Ollama 探活结果落 storage：侧栏重开或 worker 被回收后仍能立刻显示上次结果
 // ---------------------------------------------------------------------------
@@ -304,7 +363,8 @@ const HANDLERS = {
   DIGEST_ACTIVE_PAGE: digestActivePage,
   DIGEST_URL: digestUrl,
   DIGEST_TEXT: digestText,
-  GET_LAST_DIGEST: getLastDigest
+  GET_LAST_DIGEST: getLastDigest,
+  GET_ARCHIVE_STATS: getArchiveStats
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
