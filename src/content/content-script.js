@@ -168,6 +168,20 @@ if (!window.__wisdomark) {
     return best && best.len >= MIN_ROOT_LEN ? best.el : document.body;
   }
 
+  // 标题优先取正文的 h1，而不是 document.title。
+  // 实测那篇微信公众号文章：document.title 不是空，而是「微信公众平台」这个站名 ——
+  // 直接用它，卡片标题、复制出去的文本、落库记录全是站名，等于没有标题。
+  // 排除 header / nav 里的 h1：那多半是站点 logo 或导航标题，不是文章名。
+  function pickTitle() {
+    const heading = [...document.querySelectorAll('h1')].find(
+      (el) => (el.textContent || '').trim() && !el.closest('header, nav, aside, footer')
+    );
+
+    if (heading) return heading.textContent.trim();
+
+    return (document.title || '').trim();
+  }
+
   window.__wisdomark = {
     extract() {
       const root = pickRoot();
@@ -180,7 +194,7 @@ if (!window.__wisdomark) {
       return {
         ok: true,
         url: location.href,
-        title: document.title || '',
+        title: pickTitle(),
         text,
         charCount: text.length,
         images: all.slice(0, MAX_IMAGES),

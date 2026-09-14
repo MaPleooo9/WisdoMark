@@ -1,105 +1,105 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
+<html lang="zh-CN" data-page-node-id="zZOpx0PshDkGbmLyYY21KL">
+  <head data-page-node-id="RUvz8zmxdSItwxD4uJweJR">
+    <meta charset="UTF-8" data-page-node-id="mXVfa2qIlGSG3000jT7686" />
     <title>WisdoMark</title>
-    <link rel="stylesheet" href="sidepanel.css" />
+    <link rel="stylesheet" href="sidepanel.css" data-page-node-id="I7DQnlyTBiUjvmWV7zygPA" />
   </head>
-  <body>
-    <header class="header">
-      <div class="brand">
-        <span class="brand-mark">W</span>
-        <div class="brand-text">
-          <h1 class="brand-name">WisdoMark</h1>
-          <p class="brand-sub">收藏消化助手</p>
+  <body data-page-node-id="nVAMmdU0YwW01f7mlhIGu3">
+    <header class="header" data-page-node-id="5GLCjm2cHLcnyvaCZTTn0G">
+      <div class="brand" data-page-node-id="Ij2bGK1GsoM1lkV1hQHWKZ">
+        <span class="brand-mark" data-page-node-id="K0rDrlUtN4QgpugsA1fYtg">W</span>
+        <div class="brand-text" data-page-node-id="yDQF7o54sGYnN64NvEq7Y9">
+          <h1 class="brand-name" data-page-node-id="31jTtjgbX5WwH0UL8tjX1s">WisdoMark</h1>
+          <p class="brand-sub" data-page-node-id="iYWgFNmxzZg6im8kn8feOP">收藏消化助手</p>
         </div>
       </div>
 
-      <div class="status" id="ollama-status" title="本地 Ollama 连接状态">
-        <span class="dot dot-idle" id="ollama-dot"></span>
-        <span id="ollama-label">检测中…</span>
+      <div class="status" id="ollama-status" title="本地 Ollama 连接状态" data-page-node-id="AoZxOflVi95DUtJSWt6HfY">
+        <span class="dot dot-idle" id="ollama-dot" data-page-node-id="xYUOAvZks0y3FWL1245Q3Q"></span>
+        <span id="ollama-label" data-page-node-id="ZJF83NJbBy7cf7dE96CBpe">检测中…</span>
       </div>
     </header>
 
-    <main class="main">
+    <main class="main" data-page-node-id="AOu1gTlZkjpFwXUNKvKI1U">
       <!-- 输入 -->
-      <section class="card">
-        <div class="tabs" id="input-tabs">
-          <button class="tab is-active" type="button" data-pane="paste">粘贴链接</button>
-          <button class="tab" type="button" data-pane="bookmarks">最近收藏</button>
-          <button class="tab" type="button" data-pane="current">当前页面</button>
+      <section class="card" data-page-node-id="CWuyfrrrhSZfDFzDOJ0t2A">
+        <div class="tabs" id="input-tabs" data-page-node-id="Ts481okDFXgQhGMZnYLwoP">
+          <button class="tab is-active" type="button" data-pane="paste" data-page-node-id="6EOrZ97hbqt6FARILib8dt">粘贴链接</button>
+          <button class="tab" type="button" data-pane="bookmarks" data-page-node-id="rvp87CTZ1CzCq9vNZYpmrv">最近收藏</button>
+          <button class="tab" type="button" data-pane="current" data-page-node-id="P7AhkdR9ZLUe5xDIyMNRO5">当前页面</button>
         </div>
 
-        <div class="pane" id="pane-paste">
+        <div class="pane" id="pane-paste" data-page-node-id="maNIJw3AaaTgHNAX0MXRT8">
           <input
             class="input"
             id="url-input"
             type="text"
             placeholder="粘贴链接，如 https://…"
             autocomplete="off"
-            spellcheck="false"
+            spellcheck="false" data-page-node-id="5IiJ3Ifr6iFom5FoJT6wns"
           />
-          <button class="btn" id="btn-digest-url" type="button">开始消化</button>
-          <p class="hint">留空则消化当前页面。会新开一个后台标签页读正文，读完自动关掉；正文靠 JS 渲染的页面（知乎、掘金、小黑盒这类）会多等几秒等它出来。正文写在图片里的图文帖（B 站动态、小红书笔记）会用本地 OCR 把图里的字认出来再消化。</p>
+          <button class="btn" id="btn-digest-url" type="button" data-page-node-id="vpAesAYbXyN7n5boKJuHNX">开始消化</button>
+          <p class="hint" data-page-node-id="lSAtfW0bEO8dyDAClhGJVW">留空则消化当前页面。会新开一个后台标签页读正文，读完自动关掉；正文靠 JS 渲染的页面（知乎、掘金、小黑盒这类）会多等几秒等它出来。正文写在图片里的图文帖（B 站动态、小红书笔记）会用本地 OCR 把图里的字认出来再消化。</p>
         </div>
 
-        <div class="pane is-hidden" id="pane-bookmarks">
-          <label class="field-label" for="bookmark-folder">从哪个收藏夹读</label>
-          <select class="select" id="bookmark-folder">
-            <option value="__recent">最近收藏（所有文件夹）</option>
+        <div class="pane is-hidden" id="pane-bookmarks" data-page-node-id="mcqD4HkT3lMKt83RmIZR49">
+          <label class="field-label" for="bookmark-folder" data-page-node-id="vjUZjahSzaGKjvAhlGKGBO">从哪个收藏夹读</label>
+          <select class="select" id="bookmark-folder" data-page-node-id="0IDZvnZp1Kjls14H8BhOpV">
+            <option value="__recent" data-page-node-id="kFTyEpveMpgtBkuIQA63NN">最近收藏（所有文件夹）</option>
           </select>
-          <button class="btn btn-ghost" id="btn-load-bookmarks" type="button">读取</button>
-          <ul class="row-list" id="bookmark-list"></ul>
-          <p class="hint" id="bookmark-hint">选好收藏夹后点「读取」，点任意一条即可直接消化。</p>
+          <button class="btn btn-ghost" id="btn-load-bookmarks" type="button" data-page-node-id="ir0BYXgOlZdATyNetNUJIE">读取</button>
+          <ul class="row-list" id="bookmark-list" data-page-node-id="1EYx7yHOjdAkxtRglIDGEM"></ul>
+          <p class="hint" id="bookmark-hint" data-page-node-id="uQZl2CA7i2uoHEaC3XXLgE">选好收藏夹后点「读取」，点任意一条即可直接消化。</p>
         </div>
 
-        <div class="pane is-hidden" id="pane-current">
-          <div class="field">
-            <span class="field-label">标题</span>
-            <p class="field-value" id="page-title">—</p>
+        <div class="pane is-hidden" id="pane-current" data-page-node-id="r0P6OdkM11srezYfmYi8k0">
+          <div class="field" data-page-node-id="jC0opRzfCCnDvncbolxFOE">
+            <span class="field-label" data-page-node-id="HH3WFP0ghgAbwxd4aXhynA">标题</span>
+            <p class="field-value" id="page-title" data-page-node-id="PnZje6eUBNXqzTC3HuY9DB">—</p>
           </div>
 
-          <div class="field">
-            <span class="field-label">URL</span>
-            <p class="field-value field-url" id="page-url">—</p>
+          <div class="field" data-page-node-id="w7LKS0QXzEGbMyzrChvbKo">
+            <span class="field-label" data-page-node-id="zBX9iKbbNK5oKjlPsv9qMf">URL</span>
+            <p class="field-value field-url" id="page-url" data-page-node-id="Tlxmp5PGsaj9J0MNyfgkzp">—</p>
           </div>
 
-          <button class="btn" id="btn-digest-current" type="button">消化当前页面</button>
-          <button class="btn btn-ghost" id="btn-extract" type="button">只抓正文（调试）</button>
-          <p class="hint" id="extract-result">尚未抓取</p>
+          <button class="btn" id="btn-digest-current" type="button" data-page-node-id="oI80fuGiVAMArDkd4nO4ZZ">消化当前页面</button>
+          <button class="btn btn-ghost" id="btn-extract" type="button" data-page-node-id="9GF5QHn1sdyjmbXjurdjB2">只抓正文（调试）</button>
+          <p class="hint" id="extract-result" data-page-node-id="sNYJhYXPTrEiKp19KAZSXQ">尚未抓取</p>
         </div>
 
-        <p class="hint run-status is-hidden" id="run-status"></p>
+        <p class="hint run-status is-hidden" id="run-status" data-page-node-id="PX94Qg1l44WRrWdtwiCeIF"></p>
       </section>
 
       <!-- 消化结果 -->
-      <section class="card is-hidden" id="result-card">
-        <h2 class="card-title">消化结果</h2>
-        <p class="result-source" id="result-source">—</p>
-        <div id="result-body"></div>
-        <p class="hint" id="result-meta"></p>
-        <button class="btn btn-ghost is-hidden" id="btn-copy-result" type="button">复制结果</button>
+      <section class="card is-hidden" id="result-card" data-page-node-id="Urm0JbOwLEg91piOavqM1O">
+        <h2 class="card-title" data-page-node-id="AEA3GdXF0Dv5NSQI9DXxt5">消化结果</h2>
+        <p class="result-source" id="result-source" data-page-node-id="GBHrALPOMd6h8EETlNWtpe">—</p>
+        <div id="result-body" data-page-node-id="IOH8c3v7CfLH8KFMelTQeN"></div>
+        <p class="hint" id="result-meta" data-page-node-id="KvjXixRD8WkcOxjADS2sOE"></p>
+        <button class="btn btn-ghost is-hidden" id="btn-copy-result" type="button" data-page-node-id="VJNAXuGqAQtamCnXDS9WPH">复制结果</button>
 
-        <details class="raw is-hidden" id="result-raw-wrap">
-          <summary>原始输出与重试明细</summary>
-          <pre class="raw-pre" id="result-raw"></pre>
+        <details class="raw is-hidden" id="result-raw-wrap" data-page-node-id="Rlvq2kQ7BHtFrWMs3THnYp">
+          <summary data-page-node-id="KlUpnox1WoB1UWCi5ngJY2">原始输出与重试明细</summary>
+          <pre class="raw-pre" id="result-raw" data-page-node-id="PdF6F8A4u3Tdb6JxyUPRTM"></pre>
         </details>
       </section>
 
       <!-- 本地模型（默认折叠，省空间） -->
-      <details class="card details-card" id="model-card">
-        <summary class="details-summary">
-          <span class="details-title">本地模型</span>
-          <span class="details-note" id="ollama-detail">等待探活…</span>
+      <details class="card details-card" id="model-card" data-page-node-id="SKhUJQ2AFzIIV44QMYunVm">
+        <summary class="details-summary" data-page-node-id="7HoE7DeJfe0d2bv1cC49HX">
+          <span class="details-title" data-page-node-id="YbKDawnayQoasE4QPUHes6">本地模型</span>
+          <span class="details-note" id="ollama-detail" data-page-node-id="iUoIMz0wUqmEj1ZFGLrMM1">等待探活…</span>
         </summary>
-        <ul class="row-list" id="model-list"></ul>
-        <button class="btn btn-ghost" id="btn-recheck" type="button">重新探活</button>
+        <ul class="row-list" id="model-list" data-page-node-id="AEClsayeyehMgQdYHFB91M"></ul>
+        <button class="btn btn-ghost" id="btn-recheck" type="button" data-page-node-id="PWsrzkIAmam92dRBHh3iO4">重新探活</button>
       </details>
     </main>
 
-    <footer class="footer">
-      <span>Wisey · 本地运行，零云端</span>
-      <span class="badge" id="stage-badge">阶段 2</span>
+    <footer class="footer" data-page-node-id="dZEevoajakiWaIOP08yXf9">
+      <span data-page-node-id="DmpN65teICKFwVqPfwEyqu">Wisey · 本地运行，零云端</span>
+      <span class="badge" id="stage-badge" data-page-node-id="RkBO46qjUusOysjO9WCQth">阶段 2</span>
     </footer>
 
     <script type="module" src="sidepanel.js"></script>
