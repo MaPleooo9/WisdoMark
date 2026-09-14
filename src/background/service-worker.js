@@ -199,7 +199,10 @@ async function digestAndStore(extracted) {
       lowContent: !!extracted.lowContent,
       keptTabOpen: !!extracted.keptTabOpen,
       foregroundFallback: !!extracted.foregroundFallback,
-      minChars: extracted.minChars || null
+      minChars: extracted.minChars || null,
+      // 命中说明这一页卡在登录 / 权限校验界面（url / password / captcha / text 四种原因）。
+      // UI 要给的下一步和「SPA 没渲染出来」完全不同，不能混着说。
+      loginWall: extracted.loginWall || null
     },
     // OCR 的账要记清楚：识别了几张、丢了几张、补了多少字。
     // 用户看到摘要变了，得能查到是因为多喂了图片文字。

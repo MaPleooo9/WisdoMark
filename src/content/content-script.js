@@ -182,6 +182,45 @@ if (!window.__wisdomark) {
     return (document.title || '').trim();
   }
 
+  // ---------------------------------------------------------------------------
+  // 疑似「需要登录 / 权限校验」的页面
+  //
+  // 这类页面的下一步和「SPA 没渲染出来」完全不同，必须分开说：
+  //   - SPA：正文还没渲染，切到前台重试确实能拿到 → 提示「切过去重试」是对的
+  //   - 登录页：用户自己打开也只有登录界面，重试多少次还是那十几个字 → 提示重试是空头支票
+  // 实测（2026-09-14）：学校的统一身份认证页被归到了前者，给出的建议是「一定能抓到」，
+  // 而那条路根本走不通。所以要单独报一个信号出来。
+  // ---------------------------------------------------------------------------
+
+  const LOGIN_WALL_TEXT = /(登录|登陆|密码|验证码|帐号|账号|身份认证|扫码|注册)/;
+
+  // 返回命中的原因（便于排查和给用户解释），没命中返回 null
+  function detectLoginWall() {
+    // 1) 地址里直接带登录标识 —— 最省事也最准的一类
+    if (/(login|signin|sign-in|signon|auth|sso|cas|passport|oauth|verify|captcha)/i.test(location.href)) {
+      return 'url';
+    }
+
+    // 2) 密码框 / 验证码框。这两种控件几乎只出现在登录、注册、权限校验页，
+    //    比正文关键词可靠得多 —— 一篇讲「怎么登录某网站」的教程不会有密码框。
+    if (document.querySelector('input[type="password"]')) return 'password';
+
+    if (
+      document.querySelector(
+        'input[placeholder*="验证码"], input[name*="captcha" i], input[id*="captcha" i], input[name*="verify" i], input[placeholder*="动态码"], input[placeholder*="短信"]'
+      )
+    ) {
+      return 'captcha';
+    }
+
+    // 3) 兜底看正文：很短、且全是登录话术。
+    //    「很短」这个条件不能省 —— 否则一篇讲登录流程的长教程会被误判成登录墙。
+    const text = collectText(pickRoot());
+    if (text.length < 300 && LOGIN_WALL_TEXT.test(text)) return 'text';
+
+    return null;
+  }
+
   window.__wisdomark = {
     extract() {
       const root = pickRoot();
@@ -198,7 +237,9 @@ if (!window.__wisdomark) {
         text,
         charCount: text.length,
         images: all.slice(0, MAX_IMAGES),
-        imageTotal: all.length
+        imageTotal: all.length,
+        // 命中说明这一页停在登录 / 权限校验界面 —— UI 该给的下一步和「没渲染出来」完全不同
+        loginWall: detectLoginWall()
       };
     }
   };

@@ -482,7 +482,9 @@ function renderResult(resp, origin) {
     els.resultBody.append(box);
   }
 
-  if (extract?.keptTabOpen) {
+  // 登录页在上面已经解释清楚了，再补一句「切过去看看加载了什么」，
+  // 只会让人以为那边还有东西没看到
+  if (extract?.keptTabOpen && !extract?.loginWall) {
     els.resultBody.append(
       el('p', 'hint', '抓取用的那个标签页保留着没关，可以切过去看看它到底加载出了什么。')
     );
@@ -512,6 +514,33 @@ function renderLowContentNotice(resp) {
   const chars = resp?.source?.charCount || 0;
 
   const box = el('div', 'notice');
+
+  // 登录 / 权限校验页：对它说「切到前台重试」是空头支票 ——
+  // 用户自己打开也只是登录界面，重试多少次还是那十几个字。
+  // 该给的是「先登录」这一步，而不是重试建议。
+  if (resp?.extract?.loginWall) {
+    box.append(
+      el('p', 'notice-title', '这一页需要先登录'),
+      el(
+        'p',
+        'notice-body',
+        `只抓到 ${chars} 个字，页面停在登录 / 权限校验界面（${describeLoginWall(resp.extract.loginWall)}）。`
+      ),
+      el(
+        'p',
+        'hint',
+        '先在浏览器里把这一页登录好，再切回这里、用上面的「当前页面」入口消化 —— 登录之后才有正文。'
+      ),
+      el(
+        'p',
+        'hint',
+        '如果这一页本来就只是个登录页（比如学校的统一身份认证），那它没有内容可消化，忽略即可。'
+      )
+    );
+    els.resultBody.append(box);
+    return;
+  }
+
   box.append(el('p', 'notice-title', '这个页面没抓到正文'));
 
   // 图文帖走了 OCR 还是没结果 —— 这是另一种情况，不能和「页面没渲染出来」混为一谈：
@@ -554,6 +583,19 @@ function renderLowContentNotice(resp) {
   );
 
   els.resultBody.append(box);
+}
+
+// 把抓取侧报的登录墙原因翻译成人话 —— 用户该知道是凭什么判断的，
+// 否则「你凭什么说这是登录页」本身就成了新的疑问。
+function describeLoginWall(reason) {
+  const reasons = {
+    url: '地址里带登录标识',
+    password: '页面有密码输入框',
+    captcha: '页面有验证码输入框',
+    text: '页面只有登录相关文字'
+  };
+
+  return reasons[reason] || '页面特征像是登录页';
 }
 
 // OCR 的账：看了几张、认出几张、补了多少字。
