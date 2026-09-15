@@ -134,6 +134,30 @@ export function validateDigest(raw, schema) {
   };
 }
 
+// 批量排序结果的校验。结构和 variants 是两套，规则在 schema.batch 里 ——
+// 判「单篇正文能不能撑起一张卡片」和判「一批卡片的优先级」是两件事，不硬塞进同一个 variants。
+export function validateBatch(raw, schema) {
+  const section = schema?.batch;
+
+  if (!section) return { ok: false, errors: ['schema 里没有 batch 段'] };
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, errors: ['顶层必须是一个 JSON 对象'] };
+  }
+
+  const errors = [];
+  const value = {};
+
+  for (const [name, rule] of Object.entries(section.fields || {})) {
+    const result = validateField(raw[name], rule, name);
+
+    if (result.errors.length) errors.push(...result.errors);
+    else value[name] = result.value;
+  }
+
+  return errors.length ? { ok: false, errors } : { ok: true, value };
+}
+
 function validateField(raw, rule, name) {
   const errors = [];
 
@@ -208,6 +232,64 @@ function validateField(raw, rule, name) {
     }
 
     return errors.length ? { errors } : { errors, value };
+  }
+
+  if (rule.type === 'number') {
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+      return { errors: [`${name} 必须是数字，收到 ${describe(raw)}`] };
+    }
+    return { errors, value: raw };
+  }
+
+  // 批量排序的 order 用它：一个序号数组
+  if (rule.type === 'number[]') {
+    if (!Array.isArray(raw)) return { errors: [`${name} 必须是数组，收到 ${describe(raw)}`] };
+
+    if (rule.minItems != null && raw.length < rule.minItems) {
+      return { errors: [`${name} 至少 ${rule.minItems} 项，收到 ${raw.length} 项`] };
+    }
+    if (rule.maxItems != null && raw.length > rule.maxItems) {
+      return { errors: [`${name} 最多 ${rule.maxItems} 项，收到 ${raw.length} 项`] };
+    }
+
+    const bad = raw.findIndex((n) => typeof n !== 'number' || !Number.isFinite(n));
+    if (bad !== -1) return { errors: [`${name} 第 ${bad + 1} 项不是数字`] };
+
+    return { errors, value: raw };
+  }
+
+  // 对象数组：批量排序的 mustRead 用它（[{index, reason}, ...]）。
+  // 嵌套字段直接递归复用 validateField —— 只支持一层，够用，
+  // 也不必为此长出一个通用的 JSON Schema 实现。
+  if (rule.type === 'object[]') {
+    if (!Array.isArray(raw)) return { errors: [`${name} 必须是数组，收到 ${describe(raw)}`] };
+
+    if (rule.exactLen != null && raw.length !== rule.exactLen) {
+      return { errors: [`${name} 必须恰好 ${rule.exactLen} 项，收到 ${raw.length} 项`] };
+    }
+    if (rule.minItems != null && raw.length < rule.minItems) {
+      return { errors: [`${name} 至少 ${rule.minItems} 项，收到 ${raw.length} 项`] };
+    }
+    if (rule.maxItems != null && raw.length > rule.maxItems) {
+      return { errors: [`${name} 最多 ${rule.maxItems} 项，收到 ${raw.length} 项`] };
+    }
+
+    const value = [];
+    for (const [i, item] of raw.entries()) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return { errors: [`${name} 第 ${i + 1} 项必须是对象`] };
+      }
+
+      const built = {};
+      for (const [field, fieldRule] of Object.entries(rule.fields || {})) {
+        const result = validateField(item[field], fieldRule, `${name}[${i + 1}].${field}`);
+        if (result.errors.length) return { errors: result.errors };
+        built[field] = result.value;
+      }
+      value.push(built);
+    }
+
+    return { errors, value };
   }
 
   return { errors: [`${name} 的规则类型 ${rule.type} 未实现`] };

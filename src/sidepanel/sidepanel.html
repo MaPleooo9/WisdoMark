@@ -28,6 +28,7 @@
           <button class="tab is-active" type="button" data-pane="paste">粘贴链接</button>
           <button class="tab" type="button" data-pane="bookmarks">最近收藏</button>
           <button class="tab" type="button" data-pane="current">当前页面</button>
+          <button class="tab" type="button" data-pane="batch">批量</button>
         </div>
 
         <div class="pane" id="pane-paste">
@@ -67,6 +68,26 @@
           <button class="btn" id="btn-digest-current" type="button">消化当前页面</button>
           <button class="btn btn-ghost" id="btn-extract" type="button">只抓正文（调试）</button>
           <p class="hint" id="extract-result">尚未抓取</p>
+        </div>
+
+        <div class="pane is-hidden" id="pane-batch">
+          <label class="field-label" for="batch-folder">从哪个收藏夹取</label>
+          <select class="select" id="batch-folder">
+            <option value="__recent">最近收藏（所有文件夹）</option>
+          </select>
+
+          <label class="field-label" for="batch-size">消化多少条</label>
+          <select class="select" id="batch-size">
+            <option value="5">5 条</option>
+            <option value="10" selected>10 条</option>
+            <option value="15">15 条</option>
+            <option value="20">20 条</option>
+          </select>
+
+          <button class="btn" id="btn-run-batch" type="button">开始批量消化</button>
+          <p class="hint" id="batch-hint">已消化过的会直接复用归档结果，不重复耗时。中途可以关掉侧栏，下次打开接着跑。</p>
+          <ul class="row-list" id="batch-progress"></ul>
+          <div id="batch-result"></div>
         </div>
 
         <p class="hint run-status is-hidden" id="run-status"></p>

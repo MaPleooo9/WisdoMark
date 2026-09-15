@@ -4,6 +4,7 @@
 // 需要留存的内容一律落 chrome.storage，重开时先渲染缓存再刷新。
 
 import { recognizeImages, mergeWithDocument } from './ocr.js';
+import { runBatchDigest, BATCH_DEFAULT } from './batch.js';
 
 const els = {
   // 消息 / 状态
@@ -19,7 +20,8 @@ const els = {
   panes: {
     paste: document.getElementById('pane-paste'),
     bookmarks: document.getElementById('pane-bookmarks'),
-    current: document.getElementById('pane-current')
+    current: document.getElementById('pane-current'),
+    batch: document.getElementById('pane-batch')
   },
   urlInput: document.getElementById('url-input'),
   btnDigestUrl: document.getElementById('btn-digest-url'),
@@ -32,6 +34,14 @@ const els = {
   btnDigestCurrent: document.getElementById('btn-digest-current'),
   btnExtract: document.getElementById('btn-extract'),
   extractResult: document.getElementById('extract-result'),
+
+  // 批量
+  batchFolder: document.getElementById('batch-folder'),
+  batchSize: document.getElementById('batch-size'),
+  btnRunBatch: document.getElementById('btn-run-batch'),
+  batchHint: document.getElementById('batch-hint'),
+  batchProgress: document.getElementById('batch-progress'),
+  batchResult: document.getElementById('batch-result'),
 
   // 结果区
   resultCard: document.getElementById('result-card'),
@@ -150,8 +160,9 @@ function switchPane(name) {
     setHidden(pane, key !== name);
   }
 
-  // 收藏夹列表懒加载 —— 没必要每次打开侧栏都去读一遍收藏夹树
-  if (name === 'bookmarks' && !bookmarkFoldersLoaded) {
+  // 收藏夹列表懒加载 —— 没必要每次打开侧栏都去读一遍收藏夹树。
+  // 批量面板用的是同一棵树（一次加载，填两个下拉），所以两个面板共用这一次。
+  if ((name === 'bookmarks' || name === 'batch') && !bookmarkFoldersLoaded) {
     bookmarkFoldersLoaded = true;
     loadBookmarkFolders();
   }
@@ -271,20 +282,24 @@ async function runDigest(kind, payload) {
 // 「正文 + 图片文字」合成一份稿子再消化。
 // 这一步不重新抓页面 —— 抓一次要等渲染、还可能撞上登录墙，
 // 而正文和图片 URL 在第一次抓取时就已经拿到了。
-async function digestWithOcr(ocr) {
+async function digestWithOcr(ocr, { onProgress } = {}) {
   const images = ocr?.images || [];
 
   let recognized;
   try {
     recognized = await recognizeImages(images, {
       domText: ocr?.text || '',
-      onProgress: ({ stage, index, total }) => {
-        setRunLabel(
-          stage === 'engine'
-            ? '正文在图里，正在启动本地 OCR'
-            : `正在识别图片里的文字 ${index}/${total}`
-        );
-      }
+      // 单条消化时进度写进输入区的状态行；批量时由调用方接管 ——
+      // 否则那一行会变成「某一条的 OCR 进度」，和批量的整体进度对不上
+      onProgress:
+        onProgress ||
+        (({ stage, index, total }) => {
+          setRunLabel(
+            stage === 'engine'
+              ? '正文在图里，正在启动本地 OCR'
+              : `正在识别图片里的文字 ${index}/${total}`
+          );
+        })
     });
   } catch (err) {
     recognized = { ok: false, error: err?.message || String(err) };
@@ -343,6 +358,191 @@ function handleDigestUrl() {
   }
 
   runDigest('url', { url: value });
+}
+
+// ---------------------------------------------------------------------------
+// 批量消化（阶段 2.4）
+// ---------------------------------------------------------------------------
+//
+// 编排本身在 batch.js 里（放在侧栏，是因为 MV3 的 service worker 活不了几分钟）。
+// 这里只负责界面：收集选择、画进度、渲染排序结果。
+
+let batchRunning = false;
+let batchAbort = false;
+
+const BATCH_PHASE_LABEL = {
+  checking: '查归档…',
+  reused: '复用归档 ✓',
+  digesting: '消化中…',
+  done: '完成 ✓',
+  failed: '失败'
+};
+
+async function handleRunBatch() {
+  // 再按一次 = 停下。不强杀正在跑的那一条（模型调用打断不了），
+  // 让它跑完 —— 已经付出的时间不该白费，而且它跑完会顺带存进归档。
+  if (batchRunning) {
+    batchAbort = true;
+    els.batchHint.textContent = '正在停下…（当前这一条跑完就停；已经消化的都存好了）';
+    return;
+  }
+
+  const folderId = els.batchFolder.value;
+  const size = Number(els.batchSize.value) || BATCH_DEFAULT;
+
+  els.batchHint.className = 'hint';
+  els.batchProgress.innerHTML = '';
+  els.batchResult.innerHTML = '';
+  els.batchHint.textContent = '正在读取收藏夹…';
+
+  let resp;
+  try {
+    resp =
+      folderId === RECENT_VALUE
+        ? await send('GET_RECENT_BOOKMARKS', { limit: size })
+        : await send('GET_BOOKMARKS_IN_FOLDER', { folderId, limit: size });
+  } catch (err) {
+    resp = { ok: false, error: err.message };
+  }
+
+  const items = (resp?.items || []).slice(0, size);
+
+  if (!resp?.ok || !items.length) {
+    els.batchHint.className = 'hint is-fail';
+    els.batchHint.textContent = resp?.error || '这个收藏夹里没有可抓取的网页。';
+    return;
+  }
+
+  // 记住这次的选择，下次打开还是它
+  chrome.storage.local
+    .set({ [BATCH_FOLDER_STORE_KEY]: folderId, [BATCH_SIZE_STORE_KEY]: String(size) })
+    .catch(() => {});
+
+  batchRunning = true;
+  batchAbort = false;
+  els.btnRunBatch.textContent = '停止（跑完当前这条）';
+  els.batchHint.textContent = `共 ${items.length} 条，已消化过的会直接复用。`;
+
+  const rows = items.map(() => '排队中');
+  const startedAt = Date.now();
+
+  const paint = () => {
+    els.batchProgress.innerHTML = '';
+    items.forEach((item, i) => {
+      const li = el('li', 'row-item');
+      li.append(
+        el('span', 'row-title', `${i + 1}. ${item.title || item.url}`),
+        el('span', 'row-host', rows[i])
+      );
+      els.batchProgress.append(li);
+    });
+  };
+
+  paint();
+
+  let outcome;
+  try {
+    outcome = await runBatchDigest({
+      items,
+      send,
+      digestWithOcr,
+      shouldStop: () => batchAbort,
+      onProgress: ({ phase, index, total }) => {
+        if (phase === 'ranking') {
+          els.batchHint.textContent = `${total} 条都处理完，正在排序、挑必看…`;
+          return;
+        }
+
+        rows[index] = BATCH_PHASE_LABEL[phase] || phase;
+
+        const seconds = ((Date.now() - startedAt) / 1000).toFixed(0);
+        els.batchHint.textContent = `第 ${index + 1}/${total} 条 · 已用 ${seconds} 秒`;
+        paint();
+      }
+    });
+  } finally {
+    batchRunning = false;
+    els.btnRunBatch.textContent = '开始批量消化';
+  }
+
+  if (outcome.stopped) {
+    els.batchHint.className = 'hint';
+    els.batchHint.textContent = '已停下。已经消化的都进归档了，再点一次会从断点接着跑。';
+    return;
+  }
+
+  if (!outcome.ok) {
+    els.batchHint.className = 'hint is-fail';
+    els.batchHint.textContent = outcome.error || '批量消化失败。';
+    return;
+  }
+
+  const seconds = ((Date.now() - startedAt) / 1000).toFixed(0);
+  const failNote = outcome.skipped.length ? `，${outcome.skipped.length} 条没消化成功` : '';
+  els.batchHint.className = 'hint';
+  els.batchHint.textContent = `完成：${outcome.results.length} 条进入排序${failNote}，共 ${seconds} 秒。`;
+
+  renderBatchResult(outcome);
+}
+
+function renderBatchResult({ results, skipped, ranked }) {
+  const box = el('div', 'notice');
+
+  if (ranked?.ok) {
+    box.append(el('p', 'notice-title', '本周必看'));
+
+    if (ranked.overview) box.append(el('p', 'notice-body', ranked.overview));
+
+    for (const [i, entry] of ranked.mustRead.entries()) {
+      const item = results[entry.index];
+      if (!item) continue;
+
+      box.append(
+        el('p', 'notice-body', `${i + 1}. ${item.title}`),
+        el('p', 'hint', `${entry.reason}${item.category ? `（${item.category}）` : ''}`)
+      );
+    }
+  } else {
+    // 排序失败不该让整批白跑 —— 内容都已经消化并归档了
+    box.append(
+      el('p', 'notice-title', '排序没成'),
+      el('p', 'notice-body', ranked?.error || '模型没能给出排序结果。'),
+      el('p', 'hint', '下面按原顺序列出这一批的结果，内容都在。')
+    );
+  }
+
+  els.batchResult.append(box);
+
+  // 完整顺序：排好序就按排序结果，否则按原顺序
+  const order = ranked?.ok && ranked.order.length ? ranked.order : results.map((_, i) => i);
+  const list = el('ul', 'row-list');
+
+  for (const idx of order) {
+    const item = results[idx];
+    if (!item) continue;
+
+    const li = el('li', 'row-item');
+    const meta = [item.category, item.fromArchive ? '归档复用' : ''].filter(Boolean).join(' · ');
+    li.append(el('span', 'row-title', item.title), el('span', 'row-host', meta));
+    list.append(li);
+  }
+
+  els.batchResult.append(el('p', 'hint', '全部按推荐顺序'), list);
+
+  if (skipped?.length) {
+    const failList = el('ul', 'row-list');
+
+    for (const item of skipped) {
+      const li = el('li', 'row-item');
+      li.append(
+        el('span', 'row-title', item.title || item.url),
+        el('span', 'row-host', item.reason)
+      );
+      failList.append(li);
+    }
+
+    els.batchResult.append(el('p', 'hint', '没消化成功的（不影响其余条目）'), failList);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -725,12 +925,15 @@ function buildMetaText(meta, attempts) {
 
 // 下拉里第一项固定是它，代表「跨所有文件夹取最近 N 条」
 const RECENT_VALUE = '__recent';
-// 记住上次选的收藏夹 —— 侧栏关掉重开内存就没了，这类偏好得落 storage
+// 记住上次选的收藏夹与批量条数 —— 侧栏关掉重开内存就没了，这类偏好得落 storage
 const FOLDER_STORE_KEY = 'lastBookmarkFolder';
+const BATCH_FOLDER_STORE_KEY = 'lastBatchFolder';
+const BATCH_SIZE_STORE_KEY = 'lastBatchSize';
 
-// 把收藏夹树填进下拉框。只在第一次切到这个面板时调用（见 switchPane）。
+// 把收藏夹树填进下拉框。只在第一次切到相关面板时调用（见 switchPane）。
 async function loadBookmarkFolders() {
   els.bookmarkFolder.disabled = true;
+  els.batchFolder.disabled = true;
 
   let resp;
   try {
@@ -740,20 +943,30 @@ async function loadBookmarkFolders() {
   }
 
   els.bookmarkFolder.disabled = false;
+  els.batchFolder.disabled = false;
 
   // 拿不到文件夹不算致命：保留「最近收藏」这一项，真去读的时候会给出明确原因
   // （多半是没给 bookmarks 权限，service-worker 会返回能照着做的提示）
   if (!resp?.ok) {
     els.bookmarkFolder.title = resp?.error || '';
+    els.batchFolder.title = resp?.error || '';
     return;
   }
 
-  const stored = await chrome.storage.local.get(FOLDER_STORE_KEY).catch(() => ({}));
+  const stored = await chrome.storage.local
+    .get([FOLDER_STORE_KEY, BATCH_FOLDER_STORE_KEY])
+    .catch(() => ({}));
 
-  // 只重建后续项，第一项「最近收藏」始终保留
-  els.bookmarkFolder.length = 1;
+  // 单条消化和批量用的是同一棵树：前者关心「这次读哪个」，后者关心「从哪一批里取」
+  fillFolderSelect(els.bookmarkFolder, resp.folders, stored?.[FOLDER_STORE_KEY]);
+  fillFolderSelect(els.batchFolder, resp.folders, stored?.[BATCH_FOLDER_STORE_KEY]);
+}
 
-  for (const folder of resp.folders) {
+// 把收藏夹树填进一个下拉框。第一项「最近收藏」始终保留，只重建后续项。
+function fillFolderSelect(select, folders, wanted) {
+  select.length = 1;
+
+  for (const folder of folders) {
     const option = document.createElement('option');
     option.value = folder.id;
 
@@ -766,13 +979,12 @@ async function loadBookmarkFolders() {
         : '（空）';
 
     option.textContent = `${indent}${folder.title}${scope}`;
-    els.bookmarkFolder.append(option);
+    select.append(option);
   }
 
   // 上次选的收藏夹可能已经被删掉了，确认还在选项里再恢复
-  const wanted = stored?.[FOLDER_STORE_KEY];
-  if (wanted && [...els.bookmarkFolder.options].some((o) => o.value === wanted)) {
-    els.bookmarkFolder.value = wanted;
+  if (wanted && [...select.options].some((o) => o.value === wanted)) {
+    select.value = wanted;
   }
 }
 
@@ -910,8 +1122,14 @@ async function restoreLastDigest() {
 
 async function init() {
   // 先渲染上次的探活结果，避免侧栏重开时一片空白
-  const { ollamaStatus } = await chrome.storage.local.get('ollamaStatus');
+  const { ollamaStatus, [BATCH_SIZE_STORE_KEY]: lastBatchSize } = await chrome.storage.local.get([
+    'ollamaStatus',
+    BATCH_SIZE_STORE_KEY
+  ]);
   renderOllamaStatus(ollamaStatus);
+
+  // 批量的收藏夹选择由 fillFolderSelect 在加载列表时恢复，条数在这里恢复
+  if (lastBatchSize) els.batchSize.value = lastBatchSize;
 
   await refreshActiveTab();
   await restoreLastDigest();
@@ -931,6 +1149,14 @@ async function init() {
   // 选了哪个收藏夹就记住，下次开侧栏还是它
   els.bookmarkFolder.addEventListener('change', () => {
     chrome.storage.local.set({ [FOLDER_STORE_KEY]: els.bookmarkFolder.value }).catch(() => {});
+  });
+
+  els.btnRunBatch.addEventListener('click', handleRunBatch);
+  els.batchFolder.addEventListener('change', () => {
+    chrome.storage.local.set({ [BATCH_FOLDER_STORE_KEY]: els.batchFolder.value }).catch(() => {});
+  });
+  els.batchSize.addEventListener('change', () => {
+    chrome.storage.local.set({ [BATCH_SIZE_STORE_KEY]: els.batchSize.value }).catch(() => {});
   });
   els.btnCopyResult.addEventListener('click', handleCopyResult);
   els.btnRecheck.addEventListener('click', checkOllama);

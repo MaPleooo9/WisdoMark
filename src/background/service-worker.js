@@ -12,8 +12,8 @@
 
 import { pingOllama } from './llm.js';
 import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
-import { digestDocument } from './digest.js';
-import { saveDigest, countDigests, listDigests } from './store.js';
+import { digestDocument, rankBatch } from './digest.js';
+import { saveDigest, countDigests, listDigests, getDigest } from './store.js';
 
 // ---------------------------------------------------------------------------
 // 侧栏行为
@@ -307,6 +307,17 @@ async function digestText({ text, title, url, source, ocr }) {
   });
 }
 
+// 批量消化时，侧栏对每一条先问一句「这条归档里有没有」——
+// 有就直接复用，不再重跑一次模型。这是「跑第二批几乎不用等」的前提。
+async function getArchiveByUrl({ url }) {
+  try {
+    const record = await getDigest(url);
+    return { ok: true, record: record || null };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
 async function getLastDigest() {
   const { lastDigest } = await chrome.storage.local.get('lastDigest');
   return { ok: true, digest: lastDigest || null };
@@ -364,7 +375,9 @@ const HANDLERS = {
   DIGEST_URL: digestUrl,
   DIGEST_TEXT: digestText,
   GET_LAST_DIGEST: getLastDigest,
-  GET_ARCHIVE_STATS: getArchiveStats
+  GET_ARCHIVE_STATS: getArchiveStats,
+  GET_ARCHIVE_BY_URL: getArchiveByUrl,
+  RANK_BATCH: rankBatch
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

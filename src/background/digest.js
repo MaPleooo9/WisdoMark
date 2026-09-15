@@ -9,7 +9,13 @@
 //   2. 网络类错误（连不上 / 超时）不重试 —— 重试只是把 2 分钟的等待乘以 3，
 //      而且大概率还是失败。只有「输出结构不对」才值得重试。
 
-import { loadShared, buildMessages, renderTemplate, validateDigest } from './shared.js';
+import {
+  loadShared,
+  buildMessages,
+  renderTemplate,
+  validateDigest,
+  validateBatch
+} from './shared.js';
 import { chat } from './llm.js';
 
 export async function digestDocument({ title, url, text }) {
@@ -17,19 +23,65 @@ export async function digestDocument({ title, url, text }) {
 
   const source = truncateText(text || '', prompt.limits.maxInputChars);
   const shape = detectShape({ title, text: source.text });
-  const maxAttempts = prompt.limits.maxAttempts ?? 3;
-  const timeoutMs = prompt.limits.requestTimeoutMs ?? 120000;
+
+  const run = await runWithRetry({
+    prompt,
+    messages: buildMessages(prompt, { title, url, text: source.text, shape }),
+    validate: (value) => validateDigest(value, schema)
+  });
+
+  if (!run.ok) {
+    return {
+      ok: false,
+      error: run.error,
+      attempts: run.attempts,
+      source: describeSource(title, url, source)
+    };
+  }
+
+  return {
+    ok: true,
+    value: run.result.value,
+    attempts: run.attempts,
+    meta: {
+      model: prompt.model.name,
+      promptVersion: prompt.version,
+      schemaVersion: schema.version,
+      truncated: source.truncated,
+      originalChars: source.originalChars,
+      usedChars: source.text.length,
+      shape,
+      droppedFields: run.result.droppedFields || []
+    },
+    source: describeSource(title, url, source)
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 「调模型 → 解析 → 校验 → 带着错误重试」这一轮循环
+// ---------------------------------------------------------------------------
+//
+// 单篇消化和批量排序共用这一段 —— 两者的差别只在 messages 和校验规则，
+// 重试策略（带上「你上次错在哪」再问一遍）是一样的。
+//
+// 成功返回 { ok: true, result, attempts }，失败返回 { ok: false, error, attempts, networkError? }。
+// attempts 无论成败都记全：阶段 4 的 trace 和阶段 3 的失败分类都靠它。
+async function runWithRetry({ prompt, messages, validate }) {
+  const maxAttempts = prompt.limits?.maxAttempts ?? 3;
+  const timeoutMs = prompt.limits?.requestTimeoutMs ?? 120000;
 
   const attempts = [];
-  let messages = buildMessages(prompt, { title, url, text: source.text, shape });
+  let current = messages;
 
   for (let index = 1; index <= maxAttempts; index += 1) {
     const startedAt = Date.now();
     let reply;
 
     try {
-      reply = await chat(messages, prompt.model, { timeoutMs });
+      reply = await chat(current, prompt.model, { timeoutMs });
     } catch (err) {
+      // 网络类错误（连不上 / 超时）不重试 —— 重试只是把等待乘以 3，而且大概率还是失败。
+      // 只有「输出结构不对」才值得重试。
       attempts.push({
         attempt: index,
         elapsedMs: Date.now() - startedAt,
@@ -38,17 +90,12 @@ export async function digestDocument({ title, url, text }) {
         raw: ''
       });
 
-      return {
-        ok: false,
-        error: err.message,
-        attempts,
-        source: describeSource(title, url, source)
-      };
+      return { ok: false, error: err.message, attempts, networkError: true };
     }
 
     const parsed = parseJsonLoose(reply.content);
     const outcome = parsed.ok
-      ? validateDigest(parsed.value, schema)
+      ? validate(parsed.value)
       : { ok: false, errors: [`输出不是合法 JSON：${parsed.error}`] };
 
     attempts.push({
@@ -60,28 +107,11 @@ export async function digestDocument({ title, url, text }) {
       evalCount: reply.evalCount
     });
 
-    if (outcome.ok) {
-      return {
-        ok: true,
-        value: outcome.value,
-        attempts,
-        meta: {
-          model: prompt.model.name,
-          promptVersion: prompt.version,
-          schemaVersion: schema.version,
-          truncated: source.truncated,
-          originalChars: source.originalChars,
-          usedChars: source.text.length,
-          shape,
-          droppedFields: outcome.droppedFields || []
-        },
-        source: describeSource(title, url, source)
-      };
-    }
+    if (outcome.ok) return { ok: true, result: outcome, attempts };
 
     // 带上「模型上次说了什么 + 错在哪」再问一次，比原样重试有效得多
-    messages = [
-      ...messages,
+    current = [
+      ...current,
       { role: 'assistant', content: reply.content },
       {
         role: 'user',
@@ -96,8 +126,87 @@ export async function digestDocument({ title, url, text }) {
   return {
     ok: false,
     error: `连续 ${maxAttempts} 次输出都不符合结构要求，已放弃`,
-    attempts,
-    source: describeSource(title, url, source)
+    attempts
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 批量排序：N 张卡片 → 优先级 + 必看 3 条
+// ---------------------------------------------------------------------------
+//
+// 这是阶段 2.4 的核心，也是「画像 → 清单」的第一块：它输出的不是又一篇摘要，
+// 而是**对一批内容的横向判断** —— 哪些最值得先看，以及为什么。
+//
+// 输入刻意只用「标题 + 分类 + 摘要」，不喂正文：
+//   1. 十条正文合起来会撑爆上下文，而排序本来也不需要全部细节
+//   2. 强迫模型基于已消化的结论排序，而不是重新读一遍原文
+export async function rankBatch({ items = [] } = {}) {
+  const { prompt, schema } = await loadShared();
+
+  if (!items.length) return { ok: false, error: '这一批没有可排序的内容', attempts: [] };
+
+  const list = items
+    .map(
+      (it, i) =>
+        `${i + 1}. [${it.category || '未分类'}] ${it.title || '(无标题)'} —— ${it.summary || ''}`
+    )
+    .join('\n');
+
+  const vars = { readerProfile: prompt.readerProfile, count: items.length, list };
+
+  const run = await runWithRetry({
+    prompt,
+    messages: [
+      { role: 'system', content: renderTemplate(prompt.batchSystem, vars) },
+      { role: 'user', content: renderTemplate(prompt.batchUserTemplate, vars) }
+    ],
+    validate: (value) => validateBatch(value, schema)
+  });
+
+  if (!run.ok) return { ok: false, error: run.error, attempts: run.attempts };
+
+  // 结构对了不代表内容对：序号可能越界、漏项、重复 —— 这些用 schema 表达不了
+  // （要拿 items.length 去比），在这里补一道业务校验。
+  const total = items.length;
+  const rawOrder = run.result.value.order;
+
+  const seen = new Set();
+  const order = [];
+
+  for (const n of rawOrder) {
+    const idx = Math.trunc(n) - 1;
+    if (idx < 0 || idx >= total || seen.has(idx)) continue;
+    seen.add(idx);
+    order.push(idx);
+  }
+
+  // 模型漏掉的序号按原顺序补在后面。宁可顺序不完美，也不能让用户丢内容。
+  for (let i = 0; i < total; i += 1) if (!seen.has(i)) order.push(i);
+
+  const mustRead = run.result.value.mustRead
+    .map((entry) => ({ reason: entry.reason, index: Math.trunc(entry.index) - 1 }))
+    .filter((entry) => entry.index >= 0 && entry.index < total);
+
+  // 记下来：这次是模型一次给对的，还是被我们补过/裁过。阶段 3 的失败率要这个数。
+  const repaired =
+    order.length !== rawOrder.length ||
+    mustRead.length !== run.result.value.mustRead.length ||
+    new Set(run.result.value.mustRead.map((e) => Math.trunc(e.index))).size !==
+      run.result.value.mustRead.length;
+
+  return {
+    ok: true,
+    overview: run.result.value.overview,
+    order,
+    mustRead,
+    repaired,
+    attempts: run.attempts,
+    meta: {
+      model: prompt.model.name,
+      promptVersion: prompt.version,
+      schemaVersion: schema.version,
+      count: total
+    }
   };
 }
 
