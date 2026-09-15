@@ -51,11 +51,14 @@ export function renderTemplate(template, vars) {
 }
 
 // 组装首次请求的 messages
-export function buildMessages(prompt, { title, url, text }) {
+export function buildMessages(prompt, { title, url, text, shape }) {
   return [
     {
       role: 'system',
-      content: renderTemplate(prompt.system, { readerProfile: prompt.readerProfile })
+      content: renderTemplate(prompt.system, {
+        readerProfile: prompt.readerProfile,
+        shapeRule: shapeRuleFor(shape)
+      })
     },
     {
       role: 'user',
@@ -66,6 +69,30 @@ export function buildMessages(prompt, { title, url, text }) {
       })
     }
   ];
+}
+
+// 把抓取侧判定的输入形态，翻译成一句直接告诉模型的话。
+//
+// 措辞必须明确到「这是什么类型」，不能只说「按主题归纳」——
+// 实测（2026-09-15）：在 prompt 里写「聚合类要按主题归纳」这种描述性要求，
+// 模型时听时不听（同一篇周刊输出在 16~46 条之间跳）；改成明确告知类型后
+// 立刻稳定。含糊的指令对 8B 模型基本等于没写。
+// 导出是为了让仓库外的验证脚本复用同一份文案，而不是抄一份副本
+// （措辞是实测调出来的，抄出去就会和生产漂移）
+export function shapeRuleFor(shape) {
+  if (shape === 'aggregate') {
+    return (
+      '【输入类型】这份正文是「聚合类」：一份文档里收录了多条彼此无关的内容' +
+      '（周刊 / 日报 / 合集这类）。按主题分组归纳，points 的条数等于主题数，不要逐条罗列。'
+    );
+  }
+
+  if (shape === 'single') {
+    return '【输入类型】这份正文整篇在讲一件事（单一主题），不是聚合类。';
+  }
+
+  // 没拿到形态信息时不说话，按 prompt 里的通则走
+  return '';
 }
 
 // ---------------------------------------------------------------------------

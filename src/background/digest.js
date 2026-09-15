@@ -16,11 +16,12 @@ export async function digestDocument({ title, url, text }) {
   const { prompt, schema } = await loadShared();
 
   const source = truncateText(text || '', prompt.limits.maxInputChars);
+  const shape = detectShape({ title, text: source.text });
   const maxAttempts = prompt.limits.maxAttempts ?? 3;
   const timeoutMs = prompt.limits.requestTimeoutMs ?? 120000;
 
   const attempts = [];
-  let messages = buildMessages(prompt, { title, url, text: source.text });
+  let messages = buildMessages(prompt, { title, url, text: source.text, shape });
 
   for (let index = 1; index <= maxAttempts; index += 1) {
     const startedAt = Date.now();
@@ -71,6 +72,7 @@ export async function digestDocument({ title, url, text }) {
           truncated: source.truncated,
           originalChars: source.originalChars,
           usedChars: source.text.length,
+          shape,
           droppedFields: outcome.droppedFields || []
         },
         source: describeSource(title, url, source)
@@ -165,4 +167,42 @@ export function parseJsonLoose(content) {
   }
 
   return { ok: false, error: '找不到 JSON 对象' };
+}
+
+// ---------------------------------------------------------------------------
+// 输入形态判定：聚合类 vs 单一主题
+// ---------------------------------------------------------------------------
+//
+// 为什么这个判断放在代码里、而不是交给模型（2026-09-15 实测）：
+//   同一篇阮一峰周刊、同一个 prompt，模型的输出在 **16 / 42 / 45 / 46 条**之间跳。
+//   它不是不会归纳 —— 在 system 里明确告诉它「这份正文是聚合类」之后，输出立刻
+//   稳定成 **10 条、耗时 27.8s**（不给信号时要 41~66s，还常因超上限白跑一轮重试）。
+//
+//   根因是**周刊的条目在形式上就是并列清单**，和「一篇文章列了 11 个要点」长得
+//   一模一样，8B 模型区分不了「该跟随条目数」还是「该按主题归纳」。既然它判不出来，
+//   就别让它判 —— 用可机械识别的特征替它决定，再把结论明确告诉它。
+//
+// 判据要「准」而不是「宽」—— 这里的方向和登录墙检测相反：
+//   漏判 → 回到罗列，会因超上限白跑一轮重试，**但信息不丢**；
+//   误判 → 单一主题被强行归并，**会真的丢信息**（正是用户抱怨过的那个问题）。
+// 所以只收「一说出来就说明是刊物」的词。
+// 实测踩过：加过「一览」之后，「React 19 的新特性一览」这种正常文章标题被误判成聚合类。
+const AGGREGATE_PATTERNS = [
+  /周刊|周报|双周报|日报|月报|半月刊|月刊|季刊|年刊|特刊|专刊|早报|晚报/,
+  /第\s*\d+\s*期/,
+  /合集|盘点|汇总|资讯集锦|周更|要闻/,
+  /\bweekly\b|\bnewsletter\b|\broundup\b/i
+];
+
+export function detectShape({ title = '', text = '' } = {}) {
+  const hit = (value) => AGGREGATE_PATTERNS.some((re) => re.test(value));
+
+  // 标题最权威 —— 刊名几乎一定写在标题里
+  if (hit(String(title || ''))) return 'aggregate';
+
+  // 标题看不出来时（有些站点的标题被取成了站名）再看正文开头。
+  // 只取开头一小段：正文中段提到「周刊」多半只是引用，不代表这篇是聚合类。
+  if (hit(String(text || '').slice(0, 200))) return 'aggregate';
+
+  return 'single';
 }
