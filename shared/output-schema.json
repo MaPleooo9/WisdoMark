@@ -1,6 +1,6 @@
 {
   "_comment": "单一来源：消化结果的结构与校验规则。插件与阶段 3 的 Python 评测脚本共用，Python 侧按同一份规则实现校验（两边对同一份 JSON 解释一致）。",
-  "version": "1.5.1",
+  "version": "1.7.0",
   "_pointsSemantics": "points 的条数由内容决定，3~20 条都合法。这个上限一路从 5 → 8 → 20，每次都是被真实内容顶出来的，教训值得记住：5 条装不下「五阶段 + 两条路线 + 避坑指南」；改成 8 条后，一篇讲 11 个 skill 的公众号文章又被卡住 —— 实测模型自己就输出了 11 条（11 个章节一条不落），却被 maxItems: 8 判不合格、触发重试，最终妥协成 8 条，用户看到的就是「明明有 11 个却只讲 8 个」。**并列清单的条目数天然由原文决定，用固定上限去卡它只会把信息切掉。**提炼角度按体裁而定：观点类是核心观点，工具推荐类是关键事实，公告类是关键变化，教程类是关键步骤，清单类是具体条目。校验只看结构（条数 / 长度 / 去重），不校验语义 —— 语义由 prompt.json 的 system 约束。",
   "_lengthPolicy": "itemMaxLen 400 字是「防注水」的硬上限，不是目标长度 —— 从 220 放宽，是因为教程类要写清命令 / 参数 / 执行顺序，220 字经常不够用。详略取向写在 prompt.json 的 system 里（完整优先：压缩的对象是废话和重复，不是信息本身）。校验不做分类相关的分支，避免分类判错时把长度也一起判错（那会制造假失败，而 8B 模型经不起多重硬约束）。",
   "_categories": "5 类，与 prompt.json 的 system 里「先分类」一节逐一对应。改这里必须同步改 prompt.json，反之亦然。",
@@ -68,10 +68,10 @@
         "minItems": 1,
         "maxItems": 50
       },
-        "mustRead": {
-          "type": "object[]",
-          "minItems": 1,
-          "maxItems": 3,
+      "mustRead": {
+        "type": "object[]",
+        "minItems": 1,
+        "maxItems": 3,
         "fields": {
           "index": {
             "type": "number"
@@ -82,6 +82,53 @@
             "maxLen": 120
           }
         }
+      }
+    }
+  },
+  "profile": {
+    "_comment": "从已归档的内容里聚合出的读者画像。与 variants / batch 并列的第三套结构。注意 themes 只给定性的方向名与说明 —— 数量、占比这类数字由代码统计，不交给模型算。",
+    "version": "1.1.0",
+    "fields": {
+      "themes": {
+        "type": "object[]",
+        "minItems": 1,
+        "maxItems": 5,
+        "fields": {
+          "name": {
+            "type": "string",
+            "minLen": 2,
+            "maxLen": 30
+          },
+          "note": {
+            "type": "string",
+            "minLen": 4,
+            "maxLen": 150
+          }
+        }
+      },
+      "level": {
+        "type": "enum",
+        "values": [
+          "入门",
+          "进阶",
+          "实战",
+          "说不准"
+        ]
+      },
+      "stageReason": {
+        "type": "string",
+        "minLen": 15,
+        "maxLen": 240
+      },
+      "lean": {
+        "type": "string",
+        "minLen": 2,
+        "maxLen": 120
+      },
+      "summary": {
+        "type": "string",
+        "minLen": 10,
+        "maxLen": 400
       }
     }
   },

@@ -44,6 +44,11 @@ const els = {
   batchProgress: document.getElementById('batch-progress'),
   batchResult: document.getElementById('batch-result'),
 
+  // 我的画像
+  profileNote: document.getElementById('profile-note'),
+  profileBody: document.getElementById('profile-body'),
+  btnBuildProfile: document.getElementById('btn-build-profile'),
+
   // 结果区
   resultCard: document.getElementById('result-card'),
   resultSource: document.getElementById('result-source'),
@@ -604,6 +609,114 @@ function buildBatchRow(item, rank) {
   wrap.append(open);
 
   return wrap;
+}
+
+// ---------------------------------------------------------------------------
+// 我的画像（2.5）
+// ---------------------------------------------------------------------------
+//
+// 数据全部来自本地归档库，分析也全在本地跑。
+// 输入是「最近 N 条的标题 + 分类 + 摘要」，不喂正文 —— 判断「在关注什么方向」用摘要就够。
+
+async function handleBuildProfile() {
+  if (els.btnBuildProfile.disabled) return;
+
+  els.btnBuildProfile.disabled = true;
+  els.btnBuildProfile.textContent = '分析中…（约 20 秒）';
+  els.profileNote.textContent = '正在读归档、调用本地模型';
+
+  let resp;
+  try {
+    resp = await send('BUILD_PROFILE');
+  } catch (err) {
+    resp = { ok: false, error: err.message };
+  }
+
+  els.btnBuildProfile.disabled = false;
+  els.btnBuildProfile.textContent = '重新分析';
+
+  if (!resp?.ok) {
+    // 「条数不够」是正常状态而不是故障 —— 文案要说清下一步，不能只丢一句失败
+    renderProfileNotice(resp?.error || '分析失败。');
+    return;
+  }
+
+  renderProfile(resp);
+}
+
+function renderProfileNotice(text) {
+  els.profileBody.innerHTML = '';
+  els.profileBody.append(el('p', 'hint is-fail', text));
+  els.profileNote.textContent = '还没能给出结论';
+}
+
+function renderProfile(profile) {
+  els.profileBody.innerHTML = '';
+  els.profileNote.textContent = `基于最近 ${profile.sampleCount} 条 · ${formatWhen(profile.builtAt)}`;
+  // 已经有画像了，按钮的语义从「分析」变成「重新分析」。
+  // 重开侧栏还原出来的画像也走这里 —— 否则按钮会显示「分析我的收藏」，像是从没算过。
+  els.btnBuildProfile.textContent = '重新分析';
+
+  const box = el('div', 'notice');
+
+  if (profile.summary) box.append(el('p', 'notice-body', profile.summary));
+
+  if (profile.themes?.length) {
+    const ul = el('ul', 'profile-themes');
+
+    for (const theme of profile.themes) {
+      const li = el('li');
+      li.append(el('span', 'profile-theme', theme.name), el('span', 'profile-note', theme.note));
+      ul.append(li);
+    }
+
+    box.append(el('p', 'notice-title', '你在关注'), ul);
+  }
+
+  // 位置分两行：枚举值 + 它的依据。依据才是用户判断「这画像靠不靠谱」的东西，
+  // 只给一个「进阶」等于没给。
+  if (profile.level) {
+    box.append(el('p', 'notice-body', `现在的位置：${profile.level}`));
+    if (profile.stageReason) box.append(el('p', 'hint', profile.stageReason));
+  }
+
+  if (profile.lean) box.append(el('p', 'notice-body', `倾向：${profile.lean}`));
+
+  els.profileBody.append(box);
+
+  // 分类分布是代码从归档里数出来的真实数字，和上边模型给的定性判断分开显示 ——
+  // 免得用户把两者都当成「模型说的」
+  const dist = Object.entries(profile.byCategory || {}).sort((a, b) => b[1] - a[1]);
+
+  if (dist.length) {
+    const list = el('ul', 'row-list');
+
+    for (const [name, count] of dist) {
+      const li = el('li', 'row-item');
+      li.append(el('span', 'row-title', name), el('span', 'row-host', `${count} 条`));
+      list.append(li);
+    }
+
+    els.profileBody.append(el('p', 'hint', '归档里各分类的条数（直接统计，不是模型估的）'), list);
+  }
+}
+
+function formatWhen(ts) {
+  if (!ts) return '—';
+
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// 重开侧栏时先把上次的画像渲染出来，不必重跑一遍模型
+async function restoreProfile() {
+  try {
+    const resp = await send('GET_PROFILE');
+    if (resp?.ok && resp.profile) renderProfile(resp.profile);
+  } catch {
+    // 还原失败不影响使用，忽略
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1219,6 +1332,7 @@ async function init() {
 
   await refreshActiveTab();
   await restoreLastDigest();
+  await restoreProfile();
   await checkOllama();
 
   els.inputTabs.addEventListener('click', (event) => {
@@ -1247,6 +1361,7 @@ async function init() {
   });
   els.btnCopyResult.addEventListener('click', handleCopyResult);
   els.btnRecheck.addEventListener('click', checkOllama);
+  els.btnBuildProfile.addEventListener('click', handleBuildProfile);
 
   // 切标签页 / 页面跳转时同步当前页信息
   chrome.tabs.onActivated.addListener(refreshActiveTab);

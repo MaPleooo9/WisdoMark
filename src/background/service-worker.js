@@ -12,7 +12,7 @@
 
 import { pingOllama } from './llm.js';
 import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
-import { digestDocument, rankBatch } from './digest.js';
+import { digestDocument, rankBatch, buildProfile } from './digest.js';
 import { saveDigest, countDigests, listDigests, getDigest } from './store.js';
 
 // ---------------------------------------------------------------------------
@@ -356,6 +356,72 @@ async function getArchiveStats() {
 }
 
 // ---------------------------------------------------------------------------
+// 画像（2.5）：把归档里的内容聚合成「你在关注什么、现在在哪」
+// ---------------------------------------------------------------------------
+
+// 最多看这么多条。再往前的内容反映的是「当时在关注什么」，已经过时了；
+// 而且几十条的摘要合起来就不是小上下文了。
+const PROFILE_SAMPLE = 40;
+
+// 少于这个数就直接不给结论 —— 三五条内容推出来的「关注方向」纯属碰运气，
+// 而用户会把它当成事实。
+const PROFILE_MIN_SAMPLE = 5;
+
+async function buildProfileNow() {
+  let records;
+  try {
+    records = await listDigests({ limit: PROFILE_SAMPLE });
+  } catch (err) {
+    return { ok: false, error: `读归档失败：${err?.message || err}` };
+  }
+
+  if (records.length < PROFILE_MIN_SAMPLE) {
+    return {
+      ok: false,
+      error:
+        `归档里只有 ${records.length} 条，太少 —— 这样推出来的方向多半不准，所以先不给结论。` +
+        '用「批量」消化一批，或者再消化几篇，攒够 5 条以上再来。',
+      sampleCount: records.length
+    };
+  }
+
+  const result = await buildProfile({
+    items: records.map((r) => ({ title: r.title, category: r.category, summary: r.summary }))
+  });
+
+  if (!result.ok) return { ok: false, error: result.error, attempts: result.attempts };
+
+  // 分类分布走代码统计：真实数字，不经过模型。模型只给定性的判断。
+  const byCategory = {};
+  for (const r of records) {
+    const key = r.category || '未分类';
+    byCategory[key] = (byCategory[key] || 0) + 1;
+  }
+
+  const payload = {
+    ok: true,
+    themes: result.themes,
+    level: result.level,
+    stageReason: result.stageReason,
+    lean: result.lean,
+    summary: result.summary,
+    sampleCount: records.length,
+    byCategory,
+    builtAt: Date.now(),
+    meta: result.meta
+  };
+
+  // 落 storage：侧栏关掉重开还能看到上次的画像，不必重跑模型
+  await chrome.storage.local.set({ profile: payload });
+  return payload;
+}
+
+async function getProfile() {
+  const { profile } = await chrome.storage.local.get('profile');
+  return { ok: true, profile: profile || null };
+}
+
+// ---------------------------------------------------------------------------
 // Ollama 探活结果落 storage：侧栏重开或 worker 被回收后仍能立刻显示上次结果
 // ---------------------------------------------------------------------------
 
@@ -384,7 +450,9 @@ const HANDLERS = {
   GET_LAST_DIGEST: getLastDigest,
   GET_ARCHIVE_STATS: getArchiveStats,
   GET_ARCHIVE_BY_URL: getArchiveByUrl,
-  RANK_BATCH: rankBatch
+  RANK_BATCH: rankBatch,
+  BUILD_PROFILE: buildProfileNow,
+  GET_PROFILE: getProfile
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

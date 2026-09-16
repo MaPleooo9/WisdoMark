@@ -134,12 +134,17 @@ export function validateDigest(raw, schema) {
   };
 }
 
-// 批量排序结果的校验。结构和 variants 是两套，规则在 schema.batch 里 ——
-// 判「单篇正文能不能撑起一张卡片」和判「一批卡片的优先级」是两件事，不硬塞进同一个 variants。
-export function validateBatch(raw, schema) {
-  const section = schema?.batch;
-
-  if (!section) return { ok: false, errors: ['schema 里没有 batch 段'] };
+// 「一次调用产出一个对象」这类结构的通用校验，字段规则写在 schema 的某个段里。
+//
+// 现在有三套并列的结构，各有各的段：
+//   variants —— 单篇正文 → 卡片（ok:true / ok:false 两个分支）
+//   batch    —— 一批卡片的优先级排序
+//   profile  —— 从归档里聚合出的读者画像
+//
+// 判的是完全不同的东西，所以不硬塞进同一个 variants；但校验动作一模一样，
+// 抽成一个函数，免得每加一套结构就复制二十行。
+function validateSection(raw, section, label) {
+  if (!section) return { ok: false, errors: [`schema 里没有 ${label} 段`] };
 
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return { ok: false, errors: ['顶层必须是一个 JSON 对象'] };
@@ -157,6 +162,9 @@ export function validateBatch(raw, schema) {
 
   return errors.length ? { ok: false, errors } : { ok: true, value };
 }
+
+export const validateBatch = (raw, schema) => validateSection(raw, schema?.batch, 'batch');
+export const validateProfile = (raw, schema) => validateSection(raw, schema?.profile, 'profile');
 
 function validateField(raw, rule, name) {
   const errors = [];

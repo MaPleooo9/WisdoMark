@@ -14,7 +14,8 @@ import {
   buildMessages,
   renderTemplate,
   validateDigest,
-  validateBatch
+  validateBatch,
+  validateProfile
 } from './shared.js';
 import { chat } from './llm.js';
 
@@ -276,6 +277,64 @@ export function parseJsonLoose(content) {
   }
 
   return { ok: false, error: '找不到 JSON 对象' };
+}
+
+// ---------------------------------------------------------------------------
+// 画像：归档里的 N 条 → 关注方向 + 现在所处的位置
+// ---------------------------------------------------------------------------
+//
+// 2.4 的排序回答的是「这一批里该先读哪个」，画像回答的是「这个人整体在关注什么」——
+// 后者是 2.6 可行动清单的输入。
+//
+// 输入只取最近 N 条的「标题 + 分类 + 摘要」，不喂要点：
+//   几十条的要点合起来会撑爆上下文，而判断「在关注什么方向」用摘要就够。
+//
+// **数量、占比这类数字不交给模型算** —— 它在计数上不可靠，而且算错了没人看得出来。
+// 由调用方（service worker）拿归档库的真实数据统计，模型只负责定性。
+export async function buildProfile({ items = [] } = {}) {
+  const { prompt, schema } = await loadShared();
+
+  if (!items.length) {
+    return { ok: false, error: '归档里还没有可分析的内容', attempts: [] };
+  }
+
+  const list = items
+    .map(
+      (it, i) =>
+        `${i + 1}. [${it.category || '未分类'}] ${it.title || '(无标题)'} —— ${it.summary || ''}`
+    )
+    .join('\n');
+
+  const vars = { readerProfile: prompt.readerProfile, count: items.length, list };
+
+  const run = await runWithRetry({
+    prompt,
+    messages: [
+      { role: 'system', content: renderTemplate(prompt.profileSystem, vars) },
+      { role: 'user', content: renderTemplate(prompt.profileUserTemplate, vars) }
+    ],
+    validate: (value) => validateProfile(value, schema)
+  });
+
+  if (!run.ok) return { ok: false, error: run.error, attempts: run.attempts };
+
+  return {
+    ok: true,
+    themes: run.result.value.themes,
+    // level 是枚举（入门 / 进阶 / 实战 / 说不准），stageReason 是它的依据。
+    // 拆成两个字段是因为实测：让模型自由写「一句话说明位置」，它永远只写两三个字。
+    level: run.result.value.level,
+    stageReason: run.result.value.stageReason,
+    lean: run.result.value.lean,
+    summary: run.result.value.summary,
+    attempts: run.attempts,
+    meta: {
+      model: prompt.model.name,
+      promptVersion: prompt.version,
+      schemaVersion: schema.version,
+      sampleCount: items.length
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
