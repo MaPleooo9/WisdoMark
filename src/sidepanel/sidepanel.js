@@ -161,6 +161,16 @@ function switchPane(name) {
     setHidden(pane, key !== name);
   }
 
+  // 「消化结果」这张卡片是**单条消化**的产物（粘贴链接 / 当前页面 / 收藏列表都走它）。
+  // 切到批量面板就收起来 —— 批量是另一件事，留着这张卡片会让人以为批量也出了结果。
+  // 切回其他面板时按内容恢复：resultBody 里有东西（成功结果或失败原因）就说明
+  // 上次确实出过结果，不该让用户以为它丢了。
+  if (name === 'batch') {
+    setHidden(els.resultCard, true);
+  } else if (els.resultBody.innerHTML) {
+    setHidden(els.resultCard, false);
+  }
+
   // 收藏夹列表懒加载 —— 没必要每次打开侧栏都去读一遍收藏夹树。
   // 批量面板用的是同一棵树（一次加载，填两个下拉），所以两个面板共用这一次。
   if ((name === 'bookmarks' || name === 'batch') && !bookmarkFoldersLoaded) {
