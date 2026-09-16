@@ -71,7 +71,10 @@
         </div>
 
         <div class="pane is-hidden" id="pane-batch">
-          <label class="field-label" for="batch-folder">从哪个收藏夹取</label>
+          <div class="field-head">
+            <label class="field-label" for="batch-folder">从哪个收藏夹取</label>
+            <button class="link-btn" id="btn-refresh-folders" type="button">刷新列表</button>
+          </div>
           <select class="select" id="batch-folder">
             <option value="__recent">最近收藏（所有文件夹）</option>
           </select>

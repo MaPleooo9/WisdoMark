@@ -218,7 +218,12 @@ async function digestAndStore(extracted) {
   // 只在 UI 上说明这次没存上。所以这里自己吞异常，不往外抛。
   payload.archive = await archiveResult(result, payload);
 
-  await chrome.storage.local.set({ lastDigest: payload });
+  // quiet = 批量消化。此时不写「最近一次结果」：
+  // 跑完一批再重开侧栏，却只看到其中最后一条的单条结果，会让人以为整批只消化了一条。
+  if (!extracted.quiet) {
+    await chrome.storage.local.set({ lastDigest: payload });
+  }
+
   return payload;
 }
 
@@ -262,7 +267,7 @@ async function digestActivePage() {
   return digestAndStore(extracted);
 }
 
-async function digestUrl({ url }) {
+async function digestUrl({ url, quiet }) {
   const target = normalizeUrl(url);
 
   if (!target) {
@@ -272,7 +277,8 @@ async function digestUrl({ url }) {
   const extracted = await extractFromUrl(target);
   if (!extracted.ok) return extracted;
 
-  return digestAndStore(extracted);
+  // quiet 一路带到流水线：批量消化时不覆盖「最近一次结果」
+  return digestAndStore({ ...extracted, quiet: !!quiet });
 }
 
 // 用户经常只粘 "example.com/a/b"，补上协议头再试
@@ -286,7 +292,7 @@ function normalizeUrl(input) {
 
 // 侧栏做完 OCR 之后回来：正文已经是「原正文 + 图片文字」，直接走同一条流水线。
 // 这里不再重新抓一次页面 —— 那会把用户刚等到的 OCR 结果连同样的正文又抓一遍。
-async function digestText({ text, title, url, source, ocr }) {
+async function digestText({ text, title, url, source, ocr, quiet }) {
   const merged = String(text || '');
 
   if (!merged.trim()) {
@@ -299,6 +305,7 @@ async function digestText({ text, title, url, source, ocr }) {
     title: title || '',
     url: url || '',
     source: source || '',
+    quiet: !!quiet,
     minChars: ocr?.minChars || null,
     // OCR 之后的字数要重新判一次：识别出来的文字如果够长，
     // 就不该再报「这个页面没抓到正文」

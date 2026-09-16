@@ -37,6 +37,7 @@ const els = {
 
   // 批量
   batchFolder: document.getElementById('batch-folder'),
+  btnRefreshFolders: document.getElementById('btn-refresh-folders'),
   batchSize: document.getElementById('batch-size'),
   btnRunBatch: document.getElementById('btn-run-batch'),
   batchHint: document.getElementById('batch-hint'),
@@ -282,7 +283,7 @@ async function runDigest(kind, payload) {
 // 「正文 + 图片文字」合成一份稿子再消化。
 // 这一步不重新抓页面 —— 抓一次要等渲染、还可能撞上登录墙，
 // 而正文和图片 URL 在第一次抓取时就已经拿到了。
-async function digestWithOcr(ocr, { onProgress } = {}) {
+async function digestWithOcr(ocr, { onProgress, quiet } = {}) {
   const images = ocr?.images || [];
 
   let recognized;
@@ -335,6 +336,8 @@ async function digestWithOcr(ocr, { onProgress } = {}) {
     title: ocr?.title,
     url: ocr?.url,
     source: ocr?.source,
+    // 批量路径要求「别覆盖最近一次结果」，一路带下去
+    quiet: !!quiet,
     ocr: {
       used: true,
       minChars: ocr?.minChars || null,
@@ -393,6 +396,9 @@ async function handleRunBatch() {
   els.batchHint.className = 'hint';
   els.batchProgress.innerHTML = '';
   els.batchResult.innerHTML = '';
+  // 收起上一次单条消化的结果卡片 —— 跑批量时它只会碍事，
+  // 而且容易让人以为「批量只出了这一条的结果」
+  setHidden(els.resultCard, true);
   els.batchHint.textContent = '正在读取收藏夹…';
 
   let resp;
@@ -493,21 +499,20 @@ function renderBatchResult({ results, skipped, ranked }) {
 
     if (ranked.overview) box.append(el('p', 'notice-body', ranked.overview));
 
-    for (const [i, entry] of ranked.mustRead.entries()) {
+    ranked.mustRead.forEach((entry, i) => {
       const item = results[entry.index];
-      if (!item) continue;
+      if (!item) return;
 
-      box.append(
-        el('p', 'notice-body', `${i + 1}. ${item.title}`),
-        el('p', 'hint', `${entry.reason}${item.category ? `（${item.category}）` : ''}`)
-      );
-    }
+      // 「为什么必看」常驻显示 —— 它是这一批的核心产出，不该也被收进折叠里
+      box.append(el('p', 'batch-reason', `· ${entry.reason}`));
+      box.append(buildBatchRow(item, i + 1));
+    });
   } else {
     // 排序失败不该让整批白跑 —— 内容都已经消化并归档了
     box.append(
       el('p', 'notice-title', '排序没成'),
       el('p', 'notice-body', ranked?.error || '模型没能给出排序结果。'),
-      el('p', 'hint', '下面按原顺序列出这一批的结果，内容都在。')
+      el('p', 'hint', '下面按原顺序列出这一批，内容都在。')
     );
   }
 
@@ -515,19 +520,14 @@ function renderBatchResult({ results, skipped, ranked }) {
 
   // 完整顺序：排好序就按排序结果，否则按原顺序
   const order = ranked?.ok && ranked.order.length ? ranked.order : results.map((_, i) => i);
-  const list = el('ul', 'row-list');
+  const list = el('div', 'batch-list');
 
-  for (const idx of order) {
+  order.forEach((idx, rank) => {
     const item = results[idx];
-    if (!item) continue;
+    if (item) list.append(buildBatchRow(item, rank + 1));
+  });
 
-    const li = el('li', 'row-item');
-    const meta = [item.category, item.fromArchive ? '归档复用' : ''].filter(Boolean).join(' · ');
-    li.append(el('span', 'row-title', item.title), el('span', 'row-host', meta));
-    list.append(li);
-  }
-
-  els.batchResult.append(el('p', 'hint', '全部按推荐顺序'), list);
+  els.batchResult.append(el('p', 'hint', '全部（按推荐顺序，点标题看内容）'), list);
 
   if (skipped?.length) {
     const failList = el('ul', 'row-list');
@@ -543,6 +543,57 @@ function renderBatchResult({ results, skipped, ranked }) {
 
     els.batchResult.append(el('p', 'hint', '没消化成功的（不影响其余条目）'), failList);
   }
+}
+
+// 一条批量结果：左侧可展开的标题（点开看这条的消化内容），右侧「打开原文」。
+//
+// 为什么折叠而不是平铺：一批十几条，把摘要和要点全铺出来会把面板撑得没法看，
+// 用户反而找不到「哪几条值得看」。默认只给标题，想看哪条点哪条。
+function buildBatchRow(item, rank) {
+  const wrap = el('div', 'batch-row');
+
+  const details = el('details', 'batch-item');
+  const summary = el('summary');
+
+  summary.append(
+    el('span', 'batch-title', `${rank ? `${rank}. ` : ''}${item.title || item.url}`)
+  );
+  if (item.category) summary.append(el('span', 'batch-meta', item.category));
+  details.append(summary);
+
+  // 展开区就是单条消化时那张卡片的核心：摘要 + 要点
+  const detail = el('div', 'batch-detail');
+
+  if (item.summary) detail.append(el('p', '', item.summary));
+
+  if (item.points?.length) {
+    const ul = el('ul');
+    for (const point of item.points) ul.append(el('li', '', point));
+    detail.append(ul);
+  }
+
+  if (!item.summary && !item.points?.length) {
+    detail.append(el('p', '', '这条没有留下可看的内容。'));
+  }
+
+  details.append(detail);
+  wrap.append(details);
+
+  // 「打开原文」放在折叠区外面：不展开也能直接跳过去
+  const open = el('a', 'batch-open', '原文 ↗');
+
+  if (item.url) {
+    open.href = item.url;
+    open.target = '_blank';
+    open.rel = 'noopener noreferrer';
+    open.title = item.url;
+  } else {
+    open.classList.add('is-off');
+  }
+
+  wrap.append(open);
+
+  return wrap;
 }
 
 // ---------------------------------------------------------------------------
@@ -988,6 +1039,31 @@ function fillFolderSelect(select, folders, wanted) {
   }
 }
 
+// 收藏夹树只在第一次切到面板时读一次。用户中途新建了收藏夹，下拉里就不会出现 ——
+// 给一个手动刷新的入口，比每次切面板都重读一遍收藏夹树划算。
+async function handleRefreshFolders() {
+  const keepBatch = els.batchFolder.value;
+  const keepSingle = els.bookmarkFolder.value;
+
+  els.btnRefreshFolders.disabled = true;
+  els.btnRefreshFolders.textContent = '刷新中…';
+
+  try {
+    await loadBookmarkFolders();
+  } finally {
+    els.btnRefreshFolders.disabled = false;
+    els.btnRefreshFolders.textContent = '刷新列表';
+  }
+
+  // 尽量留住用户当前选的那个 —— 新建一个收藏夹不该把已选中的顶掉
+  for (const [select, keep] of [
+    [els.batchFolder, keepBatch],
+    [els.bookmarkFolder, keepSingle]
+  ]) {
+    if (keep && [...select.options].some((o) => o.value === keep)) select.value = keep;
+  }
+}
+
 async function handleLoadBookmarks() {
   const folderId = els.bookmarkFolder.value;
   const isRecent = folderId === RECENT_VALUE;
@@ -1152,6 +1228,7 @@ async function init() {
   });
 
   els.btnRunBatch.addEventListener('click', handleRunBatch);
+  els.btnRefreshFolders.addEventListener('click', handleRefreshFolders);
   els.batchFolder.addEventListener('change', () => {
     chrome.storage.local.set({ [BATCH_FOLDER_STORE_KEY]: els.batchFolder.value }).catch(() => {});
   });

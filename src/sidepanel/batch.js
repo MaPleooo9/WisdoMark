@@ -71,7 +71,9 @@ export async function runBatchDigest({
 
     let resp;
     try {
-      resp = await send('DIGEST_URL', { url: item.url });
+      // quiet：批量不覆盖「最近一次结果」。否则跑完一批、重开侧栏，
+      // 只看到其中最后一条的单条结果，会让人以为整批只消化了一条。
+      resp = await send('DIGEST_URL', { url: item.url, quiet: true });
     } catch (err) {
       resp = { ok: false, error: err?.message || String(err) };
     }
@@ -80,7 +82,7 @@ export async function runBatchDigest({
     // 批量里必须同样处理，否则图文帖会整批变成失败。
     if (resp?.needOcr && typeof digestWithOcr === 'function') {
       try {
-        resp = await digestWithOcr(resp.ocr);
+        resp = await digestWithOcr(resp.ocr, { quiet: true });
       } catch (err) {
         resp = { ok: false, error: `OCR 失败：${err?.message || err}` };
       }

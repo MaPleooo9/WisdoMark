@@ -202,6 +202,34 @@ body {
   margin-bottom: 2px;
 }
 
+/* 标签右侧挂一个小动作（比如「刷新列表」）—— 侧栏窄，为它单开一行按钮太占地方 */
+.field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.link-btn:disabled {
+  color: var(--text-faint);
+  cursor: default;
+  text-decoration: none;
+}
+
 .field-value {
   margin: 0;
   font-size: 13px;
@@ -380,6 +408,113 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- 批量结果：一条 = 左侧可展开的标题 + 右侧「打开原文」 ----
+
+   折叠用原生 <details>：不引入 JS 状态，还自带键盘可达性。
+   默认全部收起 —— 一批十几条全展开的话，卡片会长到没法用。 */
+
+.batch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.batch-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.batch-item > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 0;
+}
+
+.batch-item > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 折叠标记用 CSS 画，省掉一个字宽 */
+.batch-item > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 12px;
+  color: var(--text-faint);
+}
+
+.batch-item[open] > summary::before {
+  content: "▾";
+}
+
+.batch-title {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--text);
+}
+
+.batch-meta {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  margin-left: 4px;
+}
+
+.batch-detail {
+  padding: 2px 0 8px 12px;
+  border-left: 2px solid var(--border);
+  margin-left: 3px;
+}
+
+.batch-detail p {
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.batch-detail ul {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.batch-detail li {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  margin-bottom: 3px;
+}
+
+/* 「为什么必看」常驻显示在标题下面：它是这一批的核心产出，不该也藏进折叠里 */
+.batch-reason {
+  font-size: 11.5px;
+  color: var(--warn);
+  line-height: 1.5;
+  margin: 0 0 2px 12px;
+}
+
+.batch-open {
+  flex: none;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 4px 2px;
+  white-space: nowrap;
+}
+
+.batch-open:hover {
+  text-decoration: underline;
+}
+
+.batch-open.is-off {
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.batch-run {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 3px 0;
 }
 
 /* 模型名用等宽字体更清楚 */
