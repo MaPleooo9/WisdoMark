@@ -1450,37 +1450,6 @@ async function checkOllama() {
 }
 
 // ---------------------------------------------------------------------------
-// 与后台的长连接：快捷键靠它判断侧栏开着没有
-// ---------------------------------------------------------------------------
-//
-// 连接的存在本身就是信号 —— 断开时后台自动知道侧栏关了（点 ×、关掉整个窗口都算），
-// 这比让侧栏在卸载的瞬间发一条「我要关了」的消息可靠：
-// 那一刻页面正在销毁，消息能不能发出去是不保证的。
-//
-// 后台收到快捷键时，如果这条连接还在，就反过来让这边自己关掉自己 ——
-// 因为 chrome.sidePanel 只有 open，没有 close。
-function connectToBackground() {
-  let port;
-
-  try {
-    port = chrome.runtime.connect({ name: 'sidepanel' });
-  } catch {
-    // 扩展正在卸载 / 重载时 connect 会抛，这时候不该反复重试
-    return;
-  }
-
-  port.onMessage.addListener((msg) => {
-    if (msg?.type === 'CLOSE_SELF') window.close();
-  });
-
-  // service worker 被回收时连接会断。不重连的话，「关」这个方向就永远失灵了
-  // （后台一醒过来 panelPort 是空的，它会以为侧栏没开，于是每次都走「打开」分支）。
-  port.onDisconnect.addListener(() => {
-    setTimeout(connectToBackground, 1000);
-  });
-}
-
-// ---------------------------------------------------------------------------
 // 启动
 // ---------------------------------------------------------------------------
 
@@ -1499,9 +1468,6 @@ async function restoreLastDigest(open) {
 }
 
 async function init() {
-  // 先把与后台的长连接建起来（快捷键靠它判断侧栏开着没有）
-  connectToBackground();
-
   // 先渲染上次的探活结果，避免侧栏重开时一片空白
   const {
     ollamaStatus,
