@@ -13,7 +13,7 @@
 import { pingOllama } from './llm.js';
 import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
 import { digestDocument, rankBatch, buildProfile, buildActionPlan } from './digest.js';
-import { saveDigest, countDigests, listDigests, getDigest } from './store.js';
+import { saveDigest, countDigests, listDigests, getDigest, searchDigests } from './store.js';
 
 // ---------------------------------------------------------------------------
 // 侧栏行为
@@ -330,6 +330,41 @@ async function getLastDigest() {
   return { ok: true, digest: lastDigest || null };
 }
 
+// 归档搜索（2.3）。侧栏每敲一个字都会走这里，所以只返回结果列表本身 +
+// 一个总数，不把每条记录整份带回去 —— points 动辄几百字，几十条一起传没有意义。
+//
+// 但**列表里点开某一条时要能立刻看到摘要和要点**，所以这里把要用的字段挑出来传，
+// 不传的是 ocr / model / attempts 这些排查用的东西（那些用 GET_ARCHIVE_BY_URL 拿）。
+async function searchArchive({ keyword = '', category = '', limit = 30, before = null } = {}) {
+  try {
+    const [result, total] = await Promise.all([
+      searchDigests({ keyword, category, limit, before }),
+      countDigests()
+    ]);
+
+    return {
+      ok: true,
+      total,
+      hasMore: result.hasMore,
+      nextBefore: result.nextBefore,
+      rows: result.rows.map((r) => ({
+        key: r.key,
+        url: r.url,
+        title: r.title,
+        host: r.host,
+        category: r.category,
+        summary: r.summary,
+        points: r.points || [],
+        digestedAt: r.digestedAt,
+        firstDigestedAt: r.firstDigestedAt,
+        digestCount: r.digestCount || 1
+      }))
+    };
+  } catch (err) {
+    return { ok: false, error: `读归档失败：${err?.message || err}` };
+  }
+}
+
 // 归档库概况。侧栏用来看「落库这件事到底有没有在工作」，
 // 阶段 2.3 的归档面板和 2.4 的批量消化也从这里取数据。
 async function getArchiveStats() {
@@ -563,6 +598,7 @@ const HANDLERS = {
   GET_LAST_DIGEST: getLastDigest,
   GET_ARCHIVE_STATS: getArchiveStats,
   GET_ARCHIVE_BY_URL: getArchiveByUrl,
+  SEARCH_ARCHIVE: searchArchive,
   RANK_BATCH: rankBatch,
   BUILD_PROFILE: buildProfileNow,
   GET_PROFILE: getProfile,

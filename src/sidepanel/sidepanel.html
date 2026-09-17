@@ -29,6 +29,7 @@
           <button class="tab" type="button" data-pane="bookmarks">最近收藏</button>
           <button class="tab" type="button" data-pane="current">当前页面</button>
           <button class="tab" type="button" data-pane="batch">批量</button>
+          <button class="tab" type="button" data-pane="archive">归档</button>
         </div>
 
         <div class="pane" id="pane-paste">
@@ -91,6 +92,35 @@
           <p class="hint" id="batch-hint">已消化过的会直接复用归档结果，不重复耗时。中途可以关掉侧栏，下次打开接着跑。</p>
           <ul class="row-list" id="batch-progress"></ul>
           <div id="batch-result"></div>
+        </div>
+
+        <div class="pane is-hidden" id="pane-archive">
+          <input
+            class="input"
+            id="archive-keyword"
+            type="search"
+            placeholder="搜标题和摘要，例如：RAG / 索引 / 求职"
+            autocomplete="off"
+            spellcheck="false"
+          />
+
+          <div class="field-head">
+            <label class="field-label" for="archive-category">分类</label>
+            <span class="hint" id="archive-stat">—</span>
+          </div>
+          <select class="select" id="archive-category">
+            <option value="">全部分类</option>
+            <option value="技术学习">技术学习</option>
+            <option value="工具与产品">工具与产品</option>
+            <option value="资讯与公告">资讯与公告</option>
+            <option value="游戏娱乐">游戏娱乐</option>
+            <option value="其他">其他</option>
+            <option value="未分类">未分类</option>
+          </select>
+
+          <ul class="row-list" id="archive-list"></ul>
+          <button class="btn btn-ghost is-hidden" id="btn-archive-more" type="button">继续往下看</button>
+          <p class="hint" id="archive-hint">消化过的内容都存在本地库里，这里可以按关键词和分类翻出来。</p>
         </div>
 
         <p class="hint run-status is-hidden" id="run-status"></p>

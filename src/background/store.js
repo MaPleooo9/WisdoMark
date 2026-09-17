@@ -16,7 +16,8 @@
 // 连接对象是可以重建的，数据一律在 IndexedDB 里。
 
 const DB_NAME = 'wisdomark';
-const DB_VERSION = 1;
+// v2：加了 byTime 复合索引（分页续读要用，见 searchDigests 的说明）
+const DB_VERSION = 2;
 const STORE = 'digests';
 
 // 纯来源标记的参数，删掉不影响内容本身。
@@ -101,11 +102,28 @@ function openDb() {
 
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        const store = db.createObjectStore(STORE, { keyPath: 'key' });
-        store.createIndex('digestedAt', 'digestedAt');
-        store.createIndex('category', 'category');
-      }
+
+      // v1 → v2 升级时对象仓库已经存在，所以要拿到它再补索引，
+      // 不能像新建时那样直接 createObjectStore（那会抛「已存在」）
+      const store = db.objectStoreNames.contains(STORE)
+        ? req.transaction.objectStore(STORE)
+        : db.createObjectStore(STORE, { keyPath: 'key' });
+
+      if (!store.indexNames.contains('digestedAt')) store.createIndex('digestedAt', 'digestedAt');
+      if (!store.indexNames.contains('category')) store.createIndex('category', 'category');
+
+      // 复合索引 [digestedAt, key]：分页续读要靠它拿全序。
+      // 只用 digestedAt 会丢记录 —— 同一毫秒连续写多条时时间相同，
+      // 而续读的条件是「严格小于上一页最后一条的时间」，那些同时间、
+      // 排在后面的记录会被整个跳过（实测 35 条只翻出 34 条）。
+      // 加上主键之后每条记录的键都唯一，游标就有了全序，不重不漏。
+      if (!store.indexNames.contains('byTime')) store.createIndex('byTime', ['digestedAt', 'key']);
+    };
+
+    // 升级被别的连接挡住时（比如另一个窗口开着旧版侧栏）会一直等下去。
+    // 记一条日志，至少排查时有据可依。
+    req.onblocked = () => {
+      console.warn('[WisdoMark] 归档库升级被占用，请关掉其它已经打开的侧栏后重试');
     };
 
     req.onsuccess = () => {
@@ -197,6 +215,60 @@ export async function listDigests({ limit = 50 } = {}) {
   });
 
   return rows || [];
+}
+
+// 归档搜索：关键词 + 分类筛选，带分页。
+//
+// 搜的是「标题 + 摘要」，**不搜 points** —— 要点动辄几百字，把它也搜进去会让
+// 「正文里顺带提了一句」的内容大量命中，噪音换来的召回不划算。
+//
+// 分页用「上一页最后一条的 [消化时间, 主键]」当游标，而不是 offset：
+// offset 在库里有新内容写进来时会错位（同一条出现两次、或者漏掉一条）。
+//
+// 为什么游标要带上主键：digestedAt 是 Date.now()，**同一毫秒连续写多条会撞时间**
+// （批量消化就是连续写库），只按时间切页会漏掉「时间相同、排在后面」的记录。
+// 实测：35 条里只翻出 34 条。加上主键之后每条记录的索引键都唯一，游标有全序，不重不漏。
+// 用法上多取一条来判断「还有没有更多」—— 比再单独查一次 count 便宜。
+export async function searchDigests({ keyword = '', category = '', limit = 30, before = null } = {}) {
+  const kw = String(keyword || '').trim().toLowerCase();
+  const cat = String(category || '').trim();
+
+  const rows = await withStore('readonly', (s) => {
+    const out = [];
+    const range =
+      before?.time != null ? IDBKeyRange.upperBound([before.time, before.key], true) : null;
+    const req = s.index('byTime').openCursor(range, 'prev');
+
+    req.onsuccess = () => {
+      const cursor = req.result;
+      // 多取一条：out.length 到 limit + 1 就说明后面还有
+      if (!cursor || out.length > limit) return;
+      const row = cursor.value;
+      if (matchesArchiveQuery(row, kw, cat)) out.push(row);
+      cursor.continue();
+    };
+
+    return out;
+  });
+
+  const list = rows || [];
+  const hasMore = list.length > limit;
+  const page = hasMore ? list.slice(0, limit) : list;
+  const last = page[page.length - 1];
+
+  return {
+    rows: page,
+    hasMore,
+    nextBefore: last ? { time: last.digestedAt, key: last.key } : null
+  };
+}
+
+function matchesArchiveQuery(row, kw, cat) {
+  // 没分类的老记录归到「未分类」，和界面上的选项对齐
+  if (cat && (row.category || '未分类') !== cat) return false;
+  if (!kw) return true;
+
+  return `${row.title || ''}\n${row.summary || ''}`.toLowerCase().includes(kw);
 }
 
 // 写一条归档。同 URL 覆盖而非新增，并累计消化次数。

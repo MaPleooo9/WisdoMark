@@ -21,7 +21,8 @@ const els = {
     paste: document.getElementById('pane-paste'),
     bookmarks: document.getElementById('pane-bookmarks'),
     current: document.getElementById('pane-current'),
-    batch: document.getElementById('pane-batch')
+    batch: document.getElementById('pane-batch'),
+    archive: document.getElementById('pane-archive')
   },
   urlInput: document.getElementById('url-input'),
   btnDigestUrl: document.getElementById('btn-digest-url'),
@@ -43,6 +44,14 @@ const els = {
   batchHint: document.getElementById('batch-hint'),
   batchProgress: document.getElementById('batch-progress'),
   batchResult: document.getElementById('batch-result'),
+
+  // 归档
+  archiveKeyword: document.getElementById('archive-keyword'),
+  archiveCategory: document.getElementById('archive-category'),
+  archiveStat: document.getElementById('archive-stat'),
+  archiveList: document.getElementById('archive-list'),
+  archiveHint: document.getElementById('archive-hint'),
+  btnArchiveMore: document.getElementById('btn-archive-more'),
 
   // 我的画像
   profileNote: document.getElementById('profile-note'),
@@ -188,6 +197,10 @@ function switchPane(name) {
     bookmarkFoldersLoaded = true;
     loadBookmarkFolders();
   }
+
+  // 归档面板每次切进来都重查一次：本地查询很快，而且用户刚消化完一篇切过来
+  // 就该看到它。代价是分页回到第一页 —— 默认就 30 条，不常翻到后面。
+  if (name === 'archive') searchArchive();
 }
 
 // 「点进去就全选」：粘下一条链接时不用先 Ctrl+A 把上一条清掉。
@@ -842,6 +855,144 @@ async function restoreActions() {
     // 还原失败不影响使用，忽略
   }
 }
+
+// ---------------------------------------------------------------------------
+// 归档搜索（2.3）
+// ---------------------------------------------------------------------------
+//
+// 前面攒下来的东西到这里才算真正用上：不必「再消化一次」才能看到旧内容。
+//
+// 搜索是**本地**的（在 IndexedDB 里扫），不经过模型 —— 关键词匹配没必要花 20 秒。
+// 按语义找（「跟性能有关的」）是另一个量级的事，先不做。
+//
+// 分页用「上一页最后一条的时间」当游标，而不是把整库拉到侧栏再切：
+// 库会越攒越大，一次全读出来的代价迟早会显出来。
+
+const ARCHIVE_PAGE = 30;
+
+let archiveBefore = null; // 下一页从哪开始（null = 从头）
+let archiveSeq = 0; // 请求序号，用来丢弃过期结果
+
+async function searchArchive({ more = false } = {}) {
+  // 防抖只保证「不在打字途中狂发请求」，但用户停一下又改一个字时，
+  // 两个请求会同时在飞 —— 先发的不一定先回，界面就可能显示上一个词的結果。
+  // 所以每次请求带一个序号，回来时对不上就丢掉。
+  const seq = ++archiveSeq;
+
+  if (!more) archiveBefore = null;
+  els.btnArchiveMore.disabled = true;
+
+  let resp;
+  try {
+    resp = await send('SEARCH_ARCHIVE', {
+      keyword: els.archiveKeyword.value.trim(),
+      category: els.archiveCategory.value,
+      limit: ARCHIVE_PAGE,
+      before: archiveBefore
+    });
+  } catch (err) {
+    resp = { ok: false, error: err?.message || String(err) };
+  }
+
+  if (seq !== archiveSeq) return; // 已经有更新的查询了，这次结果作废
+
+  els.btnArchiveMore.disabled = false;
+
+  if (!resp?.ok) {
+    els.archiveStat.textContent = '读归档失败';
+    els.archiveHint.textContent = resp?.error || '读归档失败。';
+    els.archiveHint.className = 'hint is-fail';
+    return;
+  }
+
+  if (!more) els.archiveList.innerHTML = '';
+
+  for (const row of resp.rows) {
+    els.archiveList.append(buildArchiveItem(row));
+  }
+
+  archiveBefore = resp.nextBefore;
+  setHidden(els.btnArchiveMore, !resp.hasMore);
+  els.archiveHint.className = 'hint';
+
+  renderArchiveStat(resp);
+}
+
+function renderArchiveStat(resp) {
+  const shown = els.archiveList.children.length;
+  const filtered = !!els.archiveKeyword.value.trim() || !!els.archiveCategory.value;
+
+  if (!resp.total) {
+    els.archiveStat.textContent = '库里还没有内容';
+    els.archiveHint.textContent = '先消化几篇（粘贴链接、收藏夹、当前页面都行），这里就有东西可翻了。';
+    return;
+  }
+
+  els.archiveStat.textContent = filtered
+    ? `命中 ${shown}${resp.hasMore ? '+' : ''} 条 · 库中 ${resp.total} 篇`
+    : `显示 ${shown}${resp.hasMore ? '+' : ''} 条 · 库中 ${resp.total} 篇`;
+
+  if (!shown && filtered) {
+    els.archiveHint.textContent = '没找到匹配的内容。换个词试试，或者把分类改回「全部分类」。';
+  } else if (!shown) {
+    els.archiveHint.textContent = '库里还没有内容。';
+  } else {
+    els.archiveHint.textContent = '点标题展开摘要与要点；「打开原文」直接跳过去。按最近消化排序。';
+  }
+}
+
+function buildArchiveItem(row) {
+  const li = el('li', 'archive-item');
+  const details = document.createElement('details');
+
+  const summary = el('summary', 'archive-summary');
+  // 老记录可能没有分类（阶段 1 落下时还没有这个字段），chip 会返回 null
+  const chip = buildCategoryChip(row.category);
+  if (chip) summary.append(chip);
+
+  const wrap = el('div', 'archive-title-wrap');
+  wrap.append(el('span', 'archive-title', row.title || '(无标题)'));
+
+  const meta = [
+    row.host,
+    formatWhen(row.firstDigestedAt || row.digestedAt),
+    row.digestCount > 1 ? `读过 ${row.digestCount} 次` : ''
+  ].filter(Boolean);
+
+  wrap.append(el('span', 'archive-meta', meta.join(' · ')));
+  summary.append(wrap);
+  details.append(summary);
+
+  // 摘要和要点跟着列表一起回来，所以展开是瞬时的 —— 不必再请求一次。
+  // 代价只是把这两项带上，而它们本来就是用户要看的东西。
+  const body = el('div', 'archive-body');
+  if (row.summary) body.append(el('p', 'result-summary', row.summary));
+  if (row.points?.length) body.append(buildPoints(row.points));
+
+  if (row.url) {
+    const link = el('a', 'archive-link', '打开原文 ↗');
+    link.href = row.url;
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    body.append(link);
+  }
+
+  details.append(body);
+  li.append(details);
+  return li;
+}
+
+// 输入时不要每敲一个字就查一次库
+function debounce(fn, wait) {
+  let timer = null;
+
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+}
+
+const searchArchiveDebounced = debounce(() => searchArchive(), 250);
 
 // ---------------------------------------------------------------------------
 // 结果渲染
@@ -1502,6 +1653,10 @@ async function init() {
   });
 
   els.btnRunBatch.addEventListener('click', handleRunBatch);
+  // 归档：输入即搜（防抖 250ms），换分类立刻重查，翻页追加
+  els.archiveKeyword.addEventListener('input', searchArchiveDebounced);
+  els.archiveCategory.addEventListener('change', () => searchArchive());
+  els.btnArchiveMore.addEventListener('click', () => searchArchive({ more: true }));
   els.btnRefreshFolders.addEventListener('click', handleRefreshFolders);
   els.batchFolder.addEventListener('change', () => {
     chrome.storage.local.set({ [BATCH_FOLDER_STORE_KEY]: els.batchFolder.value }).catch(() => {});
