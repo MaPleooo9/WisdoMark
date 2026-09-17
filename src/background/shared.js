@@ -165,9 +165,17 @@ function validateSection(raw, section, label) {
 
 export const validateBatch = (raw, schema) => validateSection(raw, schema?.batch, 'batch');
 export const validateProfile = (raw, schema) => validateSection(raw, schema?.profile, 'profile');
+export const validateAction = (raw, schema) => validateSection(raw, schema?.action, 'action');
 
 function validateField(raw, rule, name) {
   const errors = [];
+
+  // 可选字段：模型省略它是合法的 —— 有些字段「不写」比「硬凑」好
+  // （行动清单里的 refs 就是：不是每条动作都对应某篇收藏）。
+  // 空数组也算省略，两者在语义上没有区别。
+  if (rule.optional && (raw == null || (Array.isArray(raw) && raw.length === 0))) {
+    return { errors, value: undefined };
+  }
 
   if (rule.type === 'string') {
     if (typeof raw !== 'string') return { errors: [`${name} 必须是非空字符串，收到 ${describe(raw)}`] };

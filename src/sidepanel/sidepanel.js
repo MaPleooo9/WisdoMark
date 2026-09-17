@@ -49,6 +49,11 @@ const els = {
   profileBody: document.getElementById('profile-body'),
   btnBuildProfile: document.getElementById('btn-build-profile'),
 
+  // 行动清单
+  actionNote: document.getElementById('action-note'),
+  actionBody: document.getElementById('action-body'),
+  btnBuildActions: document.getElementById('btn-build-actions'),
+
   // 结果区
   resultCard: document.getElementById('result-card'),
   resultNote: document.getElementById('result-note'),
@@ -721,6 +726,124 @@ async function restoreProfile() {
 }
 
 // ---------------------------------------------------------------------------
+// 行动清单（2.6）
+// ---------------------------------------------------------------------------
+//
+// 整条链路的终点：分类 → 归档 → 画像 → 清单。
+// 前面每一步产出的都是「对内容的理解」，只有这里产出「对下一步的建议」。
+//
+// 它依赖画像，但用户点的是「生成行动清单」—— 没有画像时后台会顺手算一份，
+// 不该要求他先去点另一个按钮。
+
+async function handleBuildActions() {
+  if (els.btnBuildActions.disabled) return;
+
+  els.btnBuildActions.disabled = true;
+  els.btnBuildActions.textContent = '生成中…（约 30 秒）';
+  // 没有画像时会先算画像，这一步要说出来，否则用户以为卡住了
+  els.actionNote.textContent = '正在读归档、调用本地模型';
+
+  let resp;
+  try {
+    resp = await send('BUILD_ACTIONS');
+  } catch (err) {
+    resp = { ok: false, error: err.message };
+  }
+
+  els.btnBuildActions.disabled = false;
+  els.btnBuildActions.textContent = '重新生成';
+
+  if (!resp?.ok) {
+    renderActionsNotice(resp);
+    return;
+  }
+
+  // 后台在没有画像时顺手算了一份 —— 这边把画像卡片一起刷新，
+  // 否则会出现「清单出来了，画像却还是空的」这种自相矛盾的状态
+  if (resp.profileStep === 'built') {
+    try {
+      const p = await send('GET_PROFILE');
+      if (p?.ok && p.profile) renderProfile(p.profile);
+    } catch {
+      // 画像卡片没刷新不影响清单本身
+    }
+  }
+
+  renderActions(resp);
+}
+
+function renderActionsNotice(resp) {
+  els.actionBody.innerHTML = '';
+  els.actionBody.append(el('p', 'hint is-fail', resp?.error || '生成失败。'));
+  els.actionNote.textContent =
+    resp?.stage === 'profile' ? '画像那一步就没成' : '还没能给出清单';
+}
+
+function renderActions(plan) {
+  els.actionBody.innerHTML = '';
+  els.actionNote.textContent = `基于最近 ${plan.sampleCount} 条 · ${formatWhen(plan.builtAt)}`;
+  // 已经有清单了，按钮语义从「生成」变成「重新生成」——
+  // 重开侧栏还原出来的清单也走这里，否则按钮会像是从没生成过
+  els.btnBuildActions.textContent = '重新生成';
+
+  if (plan.gap) {
+    const gap = el('div', 'notice');
+    gap.append(el('p', 'notice-title', '最该补的一块'), el('p', 'notice-body', plan.gap));
+    els.actionBody.append(gap);
+  }
+
+  const list = el('ul', 'action-list');
+
+  for (const action of plan.actions || []) {
+    const li = el('li', 'action-item');
+
+    const head = el('p', 'action-head');
+    if (action.kind) {
+      const kind = el('span', 'action-kind', action.kind);
+      kind.dataset.kind = action.kind;
+      head.append(kind);
+    }
+    head.append(el('span', 'action-title', action.title || ''));
+    li.append(head);
+
+    if (action.why) li.append(el('p', 'action-line', `为什么：${action.why}`));
+    if (action.how) li.append(el('p', 'action-line', `第一步：${action.how}`));
+
+    // 引用的收藏直接给链接 —— 清单的价值一半在「做什么」，
+    // 另一半在「拿什么做」，让人能立刻点进去
+    const refs = (action.refs || []).filter((r) => r?.url);
+    if (refs.length) {
+      const line = el('p', 'action-refs', '参考：');
+
+      refs.forEach((ref, i) => {
+        if (i) line.append(document.createTextNode(' · '));
+        const a = el('a', '', ref.title || ref.url);
+        a.href = ref.url;
+        a.target = '_blank';
+        a.rel = 'noreferrer';
+        a.title = ref.url;
+        line.append(a);
+      });
+
+      li.append(line);
+    }
+
+    list.append(li);
+  }
+
+  els.actionBody.append(list);
+}
+
+async function restoreActions() {
+  try {
+    const resp = await send('GET_ACTIONS');
+    if (resp?.ok && resp.actionPlan) renderActions(resp.actionPlan);
+  } catch {
+    // 还原失败不影响使用，忽略
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 结果渲染
 // ---------------------------------------------------------------------------
 
@@ -1359,6 +1482,7 @@ async function init() {
   await refreshActiveTab();
   await restoreLastDigest(lastResultOpen === true);
   await restoreProfile();
+  await restoreActions();
   await checkOllama();
 
   els.inputTabs.addEventListener('click', (event) => {
@@ -1395,6 +1519,7 @@ async function init() {
   });
   els.btnRecheck.addEventListener('click', checkOllama);
   els.btnBuildProfile.addEventListener('click', handleBuildProfile);
+  els.btnBuildActions.addEventListener('click', handleBuildActions);
 
   // 切标签页 / 页面跳转时同步当前页信息
   chrome.tabs.onActivated.addListener(refreshActiveTab);

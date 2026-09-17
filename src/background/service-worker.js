@@ -12,7 +12,7 @@
 
 import { pingOllama } from './llm.js';
 import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
-import { digestDocument, rankBatch, buildProfile } from './digest.js';
+import { digestDocument, rankBatch, buildProfile, buildActionPlan } from './digest.js';
 import { saveDigest, countDigests, listDigests, getDigest } from './store.js';
 
 // ---------------------------------------------------------------------------
@@ -392,11 +392,7 @@ async function buildProfileNow() {
   if (!result.ok) return { ok: false, error: result.error, attempts: result.attempts };
 
   // 分类分布走代码统计：真实数字，不经过模型。模型只给定性的判断。
-  const byCategory = {};
-  for (const r of records) {
-    const key = r.category || '未分类';
-    byCategory[key] = (byCategory[key] || 0) + 1;
-  }
+  const byCategory = countByCategory(records);
 
   const payload = {
     ok: true,
@@ -419,6 +415,123 @@ async function buildProfileNow() {
 async function getProfile() {
   const { profile } = await chrome.storage.local.get('profile');
   return { ok: true, profile: profile || null };
+}
+
+// ---------------------------------------------------------------------------
+// 2.6 可行动清单
+// ---------------------------------------------------------------------------
+
+// 和画像取同一批素材（最近 40 条）。两边取不同样本的话，会出现
+// 「画像说他偏实操、清单却让他先读理论」这种自相矛盾。
+const ACTION_SAMPLE = 40;
+const ACTION_MIN_SAMPLE = 5;
+
+// 分类分布由代码统计，不经过模型 —— 它在计数上不可靠，而且算错了没人看得出来。
+// 画像卡片和清单都用到它，所以抽出来共用（两处各写一遍必然漂移）。
+function countByCategory(records) {
+  const byCategory = {};
+
+  for (const r of records) {
+    const key = r.category || '未分类';
+    byCategory[key] = (byCategory[key] || 0) + 1;
+  }
+
+  return byCategory;
+}
+
+async function buildActionsNow() {
+  let records;
+  try {
+    records = await listDigests({ limit: ACTION_SAMPLE });
+  } catch (err) {
+    return { ok: false, error: `读归档失败：${err?.message || err}` };
+  }
+
+  if (records.length < ACTION_MIN_SAMPLE) {
+    return {
+      ok: false,
+      error:
+        `归档里只有 ${records.length} 条，太少 —— 基于三五条内容提的「下一步」多半是套话。` +
+        '用「批量」消化一批，或者再消化几篇，攒够 5 条以上再来。',
+      sampleCount: records.length
+    };
+  }
+
+  const items = records.map((r) => ({
+    title: r.title,
+    category: r.category,
+    summary: r.summary,
+    url: r.url
+  }));
+
+  // 清单必须基于画像。没算过就顺手算一份 —— 用户点的是「生成清单」，
+  // 不该先被要求去点另一个按钮；画像本身也会落库，侧栏的画像卡片跟着就有了。
+  const { profile: cached } = await chrome.storage.local.get('profile');
+
+  let profile = cached;
+  let profileStep = 'reused';
+
+  if (!profile?.themes?.length) {
+    const built = await buildProfile({ items });
+
+    if (!built.ok) {
+      return {
+        ok: false,
+        error: `生成清单前先要算出画像，那一步失败了：${built.error}`,
+        stage: 'profile',
+        attempts: built.attempts
+      };
+    }
+
+    profileStep = 'built';
+    profile = {
+      ok: true,
+      themes: built.themes,
+      level: built.level,
+      stageReason: built.stageReason,
+      lean: built.lean,
+      summary: built.summary,
+      sampleCount: items.length,
+      byCategory: countByCategory(records),
+      builtAt: Date.now(),
+      meta: built.meta
+    };
+
+    await chrome.storage.local.set({ profile });
+  }
+
+  const result = await buildActionPlan({ items, profile });
+
+  if (!result.ok) {
+    return { ok: false, error: result.error, stage: 'actions', attempts: result.attempts };
+  }
+
+  const payload = {
+    ok: true,
+    gap: result.gap,
+    // 动作里的 refs 是条目序号（prompt 的列表就是这么编号的）。这里投影成界面
+    // 能直接用的形状 —— 侧栏不必再查一次归档，也就不会出现「序号对不上」。
+    actions: result.actions.map((a) => ({
+      ...a,
+      refs: (a.refs || []).map((n) => ({
+        index: n,
+        title: items[n - 1]?.title || '',
+        url: items[n - 1]?.url || ''
+      }))
+    })),
+    sampleCount: items.length,
+    profileStep,
+    builtAt: Date.now(),
+    meta: result.meta
+  };
+
+  await chrome.storage.local.set({ actionPlan: payload });
+  return payload;
+}
+
+async function getActionPlan() {
+  const { actionPlan } = await chrome.storage.local.get('actionPlan');
+  return { ok: true, actionPlan: actionPlan || null };
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +565,9 @@ const HANDLERS = {
   GET_ARCHIVE_BY_URL: getArchiveByUrl,
   RANK_BATCH: rankBatch,
   BUILD_PROFILE: buildProfileNow,
-  GET_PROFILE: getProfile
+  GET_PROFILE: getProfile,
+  BUILD_ACTIONS: buildActionsNow,
+  GET_ACTIONS: getActionPlan
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

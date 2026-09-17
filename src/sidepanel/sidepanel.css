@@ -543,6 +543,95 @@ body {
   color: var(--text-dim);
 }
 
+/* ---------- 行动清单 ---------- */
+
+.action-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.action-item {
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+
+.action-item:first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+
+.action-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+/* 动作类型徽标。4 类各一色 —— 和分类徽标同一套做法：
+   中文名不能当 class，用 data-kind 属性选择器。 */
+.action-kind {
+  flex-shrink: 0;
+  margin-top: 1px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: #f0f1f4;
+  color: #5b6472;
+}
+
+.action-kind[data-kind="动手做"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.action-kind[data-kind="补一块"] {
+  background: #eaf2fd;
+  color: #2563c9;
+}
+
+.action-kind[data-kind="读一篇"] {
+  background: #e6f6f1;
+  color: #0f8a6a;
+}
+
+.action-kind[data-kind="整理"] {
+  background: #fdf5e6;
+  color: #b3760f;
+}
+
+.action-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.action-line {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+.action-refs {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  word-break: break-word;
+}
+
+.action-refs a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.action-refs a:hover {
+  text-decoration: underline;
+}
+
 /* 模型名用等宽字体更清楚 */
 #model-list .row-title {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;

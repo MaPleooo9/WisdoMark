@@ -125,6 +125,16 @@
         <button class="btn btn-ghost" id="btn-build-profile" type="button">分析我的收藏</button>
       </details>
 
+      <!-- 行动清单（默认折叠）——它依赖画像，没有画像时点一次会连画像一起算 -->
+      <details class="card details-card" id="action-card">
+        <summary class="details-summary">
+          <span class="details-title">接下来做什么</span>
+          <span class="details-note" id="action-note">还没生成过</span>
+        </summary>
+        <div class="details-body" id="action-body"></div>
+        <button class="btn btn-ghost" id="btn-build-actions" type="button">生成行动清单</button>
+      </details>
+
       <!-- 本地模型（默认折叠，省空间） -->
       <details class="card details-card" id="model-card">
         <summary class="details-summary">

@@ -15,7 +15,8 @@ import {
   renderTemplate,
   validateDigest,
   validateBatch,
-  validateProfile
+  validateProfile,
+  validateAction
 } from './shared.js';
 import { chat } from './llm.js';
 
@@ -327,6 +328,107 @@ export async function buildProfile({ items = [] } = {}) {
     stageReason: run.result.value.stageReason,
     lean: run.result.value.lean,
     summary: run.result.value.summary,
+    attempts: run.attempts,
+    meta: {
+      model: prompt.model.name,
+      promptVersion: prompt.version,
+      schemaVersion: schema.version,
+      sampleCount: items.length
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 行动清单：画像 + 归档 → 接下来能动手做的事
+// ---------------------------------------------------------------------------
+//
+// 这一步是产品差异化的落点（AGENTS.md 的「核心卖点」）：
+// 前面几步产出的都是「对内容的理解」，只有这里产出「对下一步的建议」。
+//
+// 输入是画像（定性判断）+ 最近 N 条的「标题 / 分类 / 摘要」。
+// 不喂要点：判断「该做什么」用摘要够，几十条要点会撑爆上下文。
+//
+// refs 是模型给的条目序号，schema 只能校验它「是数字数组」，管不了范围 ——
+// 越界的序号会在界面上指向不相干的内容，所以必须在这里过滤。
+export function sanitizeRefs(refs, total) {
+  if (!Array.isArray(refs)) return [];
+
+  const seen = new Set();
+  const out = [];
+
+  for (const raw of refs) {
+    // 只认整数类型。'3' / true / null 这类能靠隐式转换混进来（Math.trunc(true) === 1），
+    // 一旦混进来就是个指向不相干内容的错引用 —— 而且错得很隐蔽，
+    // 界面上只会显示一篇牛头不对马嘴的文章。宁可少给也不能给错。
+    if (typeof raw !== 'number' || !Number.isInteger(raw)) continue;
+    // 序号是 1 起（prompt 里列表就是从 1 编号的）
+    if (raw < 1 || raw > total || seen.has(raw)) continue;
+    seen.add(raw);
+    out.push(raw);
+  }
+
+  return out.sort((a, b) => a - b);
+}
+
+function renderThemes(themes = []) {
+  const lines = (themes || [])
+    .map((t) => `· ${t.name || '（未命名）'} —— ${t.note || ''}`)
+    .join('\n');
+
+  return lines || '（还没有足够的内容可以判断方向）';
+}
+
+export async function buildActionPlan({ items = [], profile = null } = {}) {
+  const { prompt, schema } = await loadShared();
+
+  if (!items.length) {
+    return { ok: false, error: '归档里还没有可分析的内容', attempts: [] };
+  }
+
+  const list = items
+    .map(
+      (it, i) =>
+        `${i + 1}. [${it.category || '未分类'}] ${it.title || '(无标题)'} —— ${it.summary || ''}`
+    )
+    .join('\n');
+
+  const vars = {
+    readerProfile: prompt.readerProfile,
+    themes: renderThemes(profile?.themes),
+    level: profile?.level || '说不准',
+    stageReason: profile?.stageReason || '（这次没能给出依据）',
+    lean: profile?.lean || '（未知）',
+    summary: profile?.summary || '（还没有整体判断）',
+    count: items.length,
+    list
+  };
+
+  const run = await runWithRetry({
+    prompt,
+    messages: [
+      { role: 'system', content: renderTemplate(prompt.actionSystem, vars) },
+      { role: 'user', content: renderTemplate(prompt.actionUserTemplate, vars) }
+    ],
+    validate: (value) => validateAction(value, schema)
+  });
+
+  if (!run.ok) return { ok: false, error: run.error, attempts: run.attempts };
+
+  const actions = run.result.value.actions.map((a) => {
+    // 逐字段显式构造（和 buildProfile 的返回一致）：多出来的字段一律丢弃，
+    // 界面上也就不用为「模型偶尔多带一个字段」做防御
+    const cleaned = { title: a.title, kind: a.kind, why: a.why, how: a.how };
+    const refs = sanitizeRefs(a.refs, items.length);
+    // refs 为空就整个省略（schema 里它本来就是可选字段），
+    // 免得界面上出现一个空的「相关收藏」
+    if (refs.length) cleaned.refs = refs;
+    return cleaned;
+  });
+
+  return {
+    ok: true,
+    gap: run.result.value.gap,
+    actions,
     attempts: run.attempts,
     meta: {
       model: prompt.model.name,
