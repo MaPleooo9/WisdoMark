@@ -51,6 +51,7 @@ const els = {
 
   // 结果区
   resultCard: document.getElementById('result-card'),
+  resultNote: document.getElementById('result-note'),
   resultSource: document.getElementById('result-source'),
   resultBody: document.getElementById('result-body'),
   resultMeta: document.getElementById('result-meta'),
@@ -789,11 +790,30 @@ function legacyCopy(text) {
   }
 }
 
-function renderResult(resp, origin) {
+// 结果卡片能收起：它常常有十几条要点，展开着会把下面的画像、本地模型全挤下去。
+// 两个时机要用不同策略，所以把决定权交给调用方，这里不猜 ——
+//   刚消化完的这一次：必须展开，否则用户会以为没出结果
+//   重开侧栏还原上次的结果：按用户上次的选择（默认收起）
+const RESULT_OPEN_KEY = 'resultCardOpen';
+
+function setResultOpen(open) {
+  if (els.resultCard.open !== open) els.resultCard.open = open;
+}
+
+// 来源同时写两处：折叠区内是完整描述（含抓到的字数），标题右侧是标题本身。
+// 收起时靠后者认出这是哪一篇。
+function setResultSource(source) {
+  els.resultSource.textContent = describeSource(source);
+  els.resultNote.textContent = source?.title || source?.url || '—';
+}
+
+function renderResult(resp, origin, { collapsed = false } = {}) {
   els.resultBody.innerHTML = '';
   els.resultBody.className = '';
   els.resultMeta.textContent = '';
+  els.resultNote.textContent = '—';
   setHidden(els.resultRawWrap, true);
+  setResultOpen(!collapsed);
   setHidden(els.resultCard, false);
 
   // 复制按钮只在出了真实结果时出现 —— 失败提示没什么可复制的。
@@ -810,7 +830,7 @@ function renderResult(resp, origin) {
 
   const { value, meta, attempts, source, extract } = resp;
 
-  els.resultSource.textContent = describeSource(source);
+  setResultSource(source);
 
   if (value.ok === true) {
     // 分类徽标可能为 null（阶段 1 落下的老结果没有 category 字段），过滤掉再插入
@@ -1038,7 +1058,7 @@ function buildPoints(points) {
 function renderFailure(resp) {
   const error = resp?.error || '未知原因';
 
-  els.resultSource.textContent = describeSource(resp?.source);
+  setResultSource(resp?.source);
   els.resultBody.className = 'notice';
 
   els.resultBody.append(
@@ -1310,10 +1330,15 @@ async function checkOllama() {
 // 启动
 // ---------------------------------------------------------------------------
 
-async function restoreLastDigest() {
+// 还原上次的单条结果。默认**收起** —— 它是上次的产物，不是这次操作的反馈，
+// 展开着会把下面的画像、本地模型都挤下去（用户就是为这个要求加折叠的）。
+// 但用户上次自己展开过，就按展开还原：那是他的选择，不该每次重开都被推翻。
+async function restoreLastDigest(open) {
   try {
     const resp = await send('GET_LAST_DIGEST');
-    if (resp?.ok && resp.digest) renderResult(resp.digest);
+    if (resp?.ok && resp.digest) {
+      renderResult(resp.digest, 'restore', { collapsed: !open });
+    }
   } catch {
     // 还原失败不影响使用，忽略
   }
@@ -1321,17 +1346,18 @@ async function restoreLastDigest() {
 
 async function init() {
   // 先渲染上次的探活结果，避免侧栏重开时一片空白
-  const { ollamaStatus, [BATCH_SIZE_STORE_KEY]: lastBatchSize } = await chrome.storage.local.get([
-    'ollamaStatus',
-    BATCH_SIZE_STORE_KEY
-  ]);
+  const {
+    ollamaStatus,
+    [BATCH_SIZE_STORE_KEY]: lastBatchSize,
+    [RESULT_OPEN_KEY]: lastResultOpen
+  } = await chrome.storage.local.get(['ollamaStatus', BATCH_SIZE_STORE_KEY, RESULT_OPEN_KEY]);
   renderOllamaStatus(ollamaStatus);
 
   // 批量的收藏夹选择由 fillFolderSelect 在加载列表时恢复，条数在这里恢复
   if (lastBatchSize) els.batchSize.value = lastBatchSize;
 
   await refreshActiveTab();
-  await restoreLastDigest();
+  await restoreLastDigest(lastResultOpen === true);
   await restoreProfile();
   await checkOllama();
 
@@ -1360,6 +1386,13 @@ async function init() {
     chrome.storage.local.set({ [BATCH_SIZE_STORE_KEY]: els.batchSize.value }).catch(() => {});
   });
   els.btnCopyResult.addEventListener('click', handleCopyResult);
+  // 记住结果卡片的展开 / 收起选择。
+  // 绑在 summary 的 click 上而不是 details 的 toggle —— 程序设置 open 也会触发 toggle，
+  // 那样「新结果自动展开」会顺手把偏好改成展开，下次重开就永远是展开的。
+  // click 发生在状态切换之前，所以这里取到的是「即将变成」的值。
+  els.resultCard.querySelector('summary').addEventListener('click', () => {
+    chrome.storage.local.set({ [RESULT_OPEN_KEY]: !els.resultCard.open }).catch(() => {});
+  });
   els.btnRecheck.addEventListener('click', checkOllama);
   els.btnBuildProfile.addEventListener('click', handleBuildProfile);
 

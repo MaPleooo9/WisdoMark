@@ -747,6 +747,22 @@ body {
   color: var(--fail);
 }
 
+/* 折叠区的内容与 summary 之间的间距。原来「消化结果」是个 h2（自带下边距），
+   换成 summary 之后间距没了，内容会贴着标题。 */
+.details-body {
+  margin-top: 10px;
+}
+
+/* 结果卡片的收起提示：单行省略。
+   它是来源标题 —— 收起时靠它认出这是哪一篇，但长标题不该把行数顶起来。
+   完整来源（含抓到的字数）在折叠区内，两者分工不同。 */
+#result-note {
+  max-width: 58%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- 底栏 ---------- */
 
 .footer {

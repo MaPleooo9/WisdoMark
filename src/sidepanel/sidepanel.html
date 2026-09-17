@@ -97,18 +97,23 @@
       </section>
 
       <!-- 消化结果 -->
-      <section class="card is-hidden" id="result-card">
-        <h2 class="card-title">消化结果</h2>
-        <p class="result-source" id="result-source">—</p>
-        <div id="result-body"></div>
-        <p class="hint" id="result-meta"></p>
-        <button class="btn btn-ghost is-hidden" id="btn-copy-result" type="button">复制结果</button>
+      <details class="card details-card is-hidden" id="result-card" open>
+        <summary class="details-summary">
+          <span class="details-title">消化结果</span>
+          <span class="details-note" id="result-note">—</span>
+        </summary>
+        <div class="details-body">
+          <p class="result-source" id="result-source">—</p>
+          <div id="result-body"></div>
+          <p class="hint" id="result-meta"></p>
+          <button class="btn btn-ghost is-hidden" id="btn-copy-result" type="button">复制结果</button>
 
-        <details class="raw is-hidden" id="result-raw-wrap">
-          <summary>原始输出与重试明细</summary>
-          <pre class="raw-pre" id="result-raw"></pre>
-        </details>
-      </section>
+          <details class="raw is-hidden" id="result-raw-wrap">
+            <summary>原始输出与重试明细</summary>
+            <pre class="raw-pre" id="result-raw"></pre>
+          </details>
+        </div>
+      </details>
 
       <!-- 我的画像（默认折叠，省空间） -->
       <details class="card details-card" id="profile-card">
