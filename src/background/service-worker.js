@@ -26,6 +26,121 @@ chrome.sidePanel
   .catch((err) => console.error('[WisdoMark] 设置侧栏行为失败：', err));
 
 // ---------------------------------------------------------------------------
+// 快捷键：Alt+Shift+W 开 / 关侧栏
+// ---------------------------------------------------------------------------
+//
+// **侧栏没有「关闭」API**（chrome.sidePanel 只有 open / setOptions / setPanelBehavior），
+// 所以「关」只能让侧栏页面自己调 window.close()。
+//
+// 那就要知道它现在开着没有 —— 也没有查询接口。于是用一条长连接当信号：
+// 侧栏打开时 connect，被关掉时连接自动断开，这边就据此判断。
+//
+// 为什么不用「侧栏主动发消息说我要关了」：用户点 × 关闭时页面直接卸载，
+// 那一刻能不能把消息发出去是不保证的；而连接断开由浏览器保证会通知到这边。
+//
+// 这个状态丢了也不打紧 —— 它只决定快捷键该开还是该关，猜错最多多按一次。
+let panelPort = null;
+
+// **打开侧栏必须同步发起，中间不能 await 别的东西。**
+// sidePanel.open() 要求发生在用户手势里，而这个手势标志的存活时间极短 ——
+// 社区多个案例报告：中间只要 await 一次（哪怕只是查一下当前窗口在哪），
+// 手势就过期，报「may only be called in response to a user gesture」。
+// （我实测过一次没复现 —— 但那是用调试协议注入的手势，和真实按键不是一条路，
+//   不足以推翻这些案例。这里按「最坏情况」写：成本只是缓存一个 id。）
+// 所以提前把 windowId 缓存下来，快捷键回调里直接同步用。
+let lastWindowId = null;
+
+chrome.tabs.onActivated.addListener(({ windowId }) => {
+  lastWindowId = windowId;
+});
+
+// chrome.windows 不需要额外权限，但写成可选链 —— 顶层代码一旦抛错，
+// 整个 service worker 就起不来了（症状是「扩展整个不工作」，很难往这里想）
+chrome.windows?.onFocusChanged.addListener((windowId) => {
+  if (windowId !== chrome.windows.WINDOW_ID_NONE) lastWindowId = windowId;
+});
+
+// service worker 冷启动时补一次缓存（顶层执行；用户按快捷键时通常已经拿到）
+chrome.tabs
+  .query({ active: true, lastFocusedWindow: true })
+  .then(([tab]) => {
+    if (tab) lastWindowId = tab.windowId;
+  })
+  .catch(() => {});
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'sidepanel') return;
+
+  panelPort = port;
+  port.onDisconnect.addListener(() => {
+    if (panelPort === port) panelPort = null;
+  });
+});
+
+// 快捷键失败是**沉默**的（用户按了没反应，看不到任何界面），
+// 所以贴一个角标让「出过事」可见，同时把原因说清楚。
+// 不加 notifications 权限 —— 一个角标够用，也不打扰用户。
+function reportOpenFailure(err) {
+  chrome.action.setBadgeText({ text: '!' }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ color: '#d93b3b' }).catch(() => {});
+
+  return {
+    ok: false,
+    error:
+      `没能打开侧栏：${err?.message || err}。` +
+      '如果按快捷键没反应，最常见的原因是快捷键被别的扩展占用了 —— ' +
+      '到 edge://extensions/shortcuts 给 WisdoMark 换一个；那里显示正常的话，点工具栏图标也能打开。'
+  };
+}
+
+// 注意：这个函数里 chrome.sidePanel.open() 是**同步发起**的（见上面关于手势的说明）
+function openSidePanel(windowId) {
+  return chrome.sidePanel
+    .open({ windowId })
+    .then(() => {
+      chrome.action.setBadgeText({ text: '' }).catch(() => {});
+      return { ok: true, action: 'opened' };
+    })
+    .catch((err) => reportOpenFailure(err));
+}
+
+async function toggleSidePanel() {
+  // 已经开着 → 让它自己关掉
+  if (panelPort) {
+    try {
+      panelPort.postMessage({ type: 'CLOSE_SELF' });
+      return { ok: true, action: 'closed' };
+    } catch {
+      // 端口刚好失效（比如用户在同一瞬间点了 ×）→ 当成没开，往下走
+      panelPort = null;
+    }
+  }
+
+  // 侧栏是 per-window 的，所以带上窗口 id
+  if (lastWindowId != null) return openSidePanel(lastWindowId);
+
+  // 缓存是空的（service worker 刚被唤醒、顶层那次 query 还没回来）→ 退回回调式查询。
+  // 这里用回调而不是 await：await 会让手势过期，而回调这条路是社区验证过的。
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, ([tab]) => {
+      if (!tab) {
+        resolve({ ok: false, error: '找不到当前窗口，没法打开侧栏' });
+        return;
+      }
+
+      lastWindowId = tab.windowId;
+      resolve(openSidePanel(tab.windowId));
+    });
+  });
+}
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== 'toggle-sidepanel') return;
+
+  toggleSidePanel().catch((err) => console.error('[WisdoMark] 快捷键处理失败：', err));
+});
+
+// ---------------------------------------------------------------------------
 // 收藏夹
 // ---------------------------------------------------------------------------
 
@@ -567,7 +682,11 @@ const HANDLERS = {
   BUILD_PROFILE: buildProfileNow,
   GET_PROFILE: getProfile,
   BUILD_ACTIONS: buildActionsNow,
-  GET_ACTIONS: getActionPlan
+  GET_ACTIONS: getActionPlan,
+  // 快捷键走的也是这一段逻辑。留一个消息入口有两个用处：
+  // 一是验证脚本能驱动它（浏览器级按键不经过页面，没法在无头里模拟），
+  // 二是以后侧栏若要放一个「收起」按钮，直接就能接上。
+  TOGGLE_SIDEPANEL: toggleSidePanel
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

@@ -99,6 +99,51 @@ git ls-remote --heads gitee main   # 两行哈希应与 git rev-parse HEAD 相�
 
 ---
 
+### 快捷键开 / 关侧栏：四个只有实测才会知道的点
+
+需求原话：「能不能给这个插件弹出关闭侧边栏加一个快捷键，不然每次都要点开有点麻烦。」
+
+**1. 侧栏没有「关闭」API。** `chrome.sidePanel` 只有 `open` / `setOptions` / `setPanelBehavior`，
+没有 `close`。所以「关」只能让侧栏页面自己 `window.close()` —— 实测**有效**
+（无头里对着真实侧栏的 target 调，target 确实消失）。
+
+**2. 要被「关」的那一方，得先知道自己开着。** 也没有查询接口。做法是用一条长连接当信号：
+侧栏 `chrome.runtime.connect({ name: 'sidepanel' })`，被关掉时连接自动断开，后台据此判断。
+不用「侧栏卸载时发一条消息说我要关了」—— 那一刻页面正在销毁，消息发不发得出去不保证；
+而连接断开由浏览器保证会通知到。service worker 被回收时连接也会断，所以侧栏要**自动重连**，
+否则后台一醒过来就以为侧栏没开，表现为「侧栏开着时按快捷键没反应」。
+
+**3. `sidePanel.open()` 的手势标志存活期极短 —— 调用前不能 `await` 任何东西。**
+Chrome 文档确认快捷键算用户手势，但社区多个案例报告：这个标志只活约 1ms，
+中间 `await chrome.tabs.query(...)` 一下就会报
+`sidePanel.open() may only be called in response to a user gesture`。
+→ **提前缓存 windowId，在命令回调里同步调用 open()**：
+
+```js
+let lastWindowId = null;
+chrome.tabs.onActivated.addListener(({ windowId }) => { lastWindowId = windowId; });
+// 快捷键回调里：
+if (lastWindowId != null) return openSidePanel(lastWindowId);   // 同步发起
+// 缓存为空（SW 刚被唤醒）才退回**回调式** query —— 不要用 await
+```
+
+> 我实测过一次没复现（用调试协议注入的手势，`await` 之后仍然成功）—— 但那是**注入的手势**，
+> 和真实按键不是同一条路径，不足以推翻那些案例。这里按最坏情况写：成本只是缓存一个 id，
+> 赌错的代价是「快捷键完全没反应」这种极难归因的故障。
+
+**4. 快捷键分配失败是静默的。** `commands` 里写了 `suggested_key`，但如果和别的扩展冲突，
+浏览器**不报错也不通知**，只是不分配（`chrome.commands.getAll()` 返回 `shortcut: ""`，
+本项目在无头里就是这么显示的）。所以文档里必须写一句「没反应就去 `edge://extensions/shortcuts` 看」——
+那是用户唯一的自救入口。后台 `open()` 真失败时贴一个 `!` 角标（不加 notifications 权限），
+因为快捷键的失败是**完全沉默**的：用户按下去，看不到任何界面。
+
+**验证**（`wm-shortcut-test.mjs`，10/10）：命令注册与描述；真实侧栏开出来之后，
+从另一个页面发消息走「关闭」分支，断言侧栏 target 真的消失、且没有误关别的页面；
+侧栏关掉后再发一次，断言不会被误判成「还开着」（否则快捷键会一直走关闭分支，等于废掉）。
+
+> 浏览器级的按键**没法在无头里模拟**（全局快捷键不经过页面，CDP 的键盘事件只到渲染进程）。
+> 所以「按下去有没有反应」这一条只能人验 —— 别把它写进测试报告当成通过。
+
 ### 运行前置：`OLLAMA_ORIGINS` 必须放行扩展来源
 
 阶段 1 实测踩到：插件状态灯是绿的（探活成功），一消化就报 `HTTP 403`，5ms 返回、模型根本没被调用。
@@ -604,6 +649,7 @@ KV 得把整个数组读出来自己筛。IndexedDB 有索引、能游标分页�
 | `wm-collapse-test.mjs` | 结果卡片可收起：默认值分叉（还原 vs 新结果）、偏好记忆、切面板不干扰 | 17/17 |
 | `wm-action-test.mjs` | 行动清单模型层：`sanitizeRefs` 单测 + 真实模型「画像 → 清单」 | 23/23 |
 | `wm-action-ui.mjs` | 行动清单界面层：初始空状态、归档为空的真实错误路径、注入假清单验渲染与还原 | 17/17 |
+| `wm-shortcut-test.mjs` | 快捷键：命令注册、真实侧栏的开 / 关两条分支、关闭后状态不残留 | 10/10（按键本身需人验）|
 
 #### 结果卡片的默认展开状态，按「谁触发的渲染」分叉
 
