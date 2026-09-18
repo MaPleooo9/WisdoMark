@@ -686,9 +686,14 @@ body {
   padding-bottom: 10px;
 }
 
+.archive-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 6px 0 0;
+}
+
 .archive-link {
-  display: inline-block;
-  margin-top: 6px;
   font-size: 11px;
   color: var(--accent);
   text-decoration: none;
@@ -696,6 +701,11 @@ body {
 
 .archive-link:hover {
   text-decoration: underline;
+}
+
+/* 归档条目里的「重新消化」跟着链接的字号走 */
+.archive-actions .link-btn {
+  font-size: 11px;
 }
 
 /* 模型名用等宽字体更清楚 */

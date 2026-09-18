@@ -95,6 +95,12 @@
         </div>
 
         <div class="pane is-hidden" id="pane-archive">
+          <!-- 只有存在「旧分类体系下判的」记录时才出现，平时不占位置 -->
+          <div class="field-head is-hidden" id="reclassify-box">
+            <span class="hint" id="reclassify-hint">—</span>
+            <button class="link-btn" id="btn-reclassify" type="button">重新分类</button>
+          </div>
+
           <input
             class="input"
             id="archive-keyword"

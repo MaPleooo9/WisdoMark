@@ -271,6 +271,34 @@ function matchesArchiveQuery(row, kw, cat) {
   return `${row.title || ''}\n${row.summary || ''}`.toLowerCase().includes(kw);
 }
 
+// 列出「分类体系比当前旧的」记录 —— 重新分类只处理这些。
+//
+// 判断依据是记录自己带的 promptVersion，不引入任何外部状态：
+// 改了 prompt 并升版本号，老记录就自动变成"待更新"；
+// 重跑过的记录会写入新版本号，于是**中断后再点一次会自动跳过已处理的**。
+//
+// 顺序按最近消化倒序（走的还是 byTime 索引），让刚看过的内容先被校正。
+export async function listStaleDigests({ version = '', limit = 0 } = {}) {
+  const cur = String(version || '');
+
+  const rows = await withStore('readonly', (s) => {
+    const out = [];
+    const req = s.index('byTime').openCursor(null, 'prev');
+
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor || (limit > 0 && out.length >= limit)) return;
+      const row = cursor.value;
+      if ((row.promptVersion || '') !== cur) out.push(row);
+      cursor.continue();
+    };
+
+    return out;
+  });
+
+  return rows || [];
+}
+
 // 写一条归档。同 URL 覆盖而非新增，并累计消化次数。
 //
 // 「先读再写」分成两次事务 —— 单看这一步是有竞态的，但消息路由是串行处理
@@ -292,6 +320,10 @@ export async function saveDigest(record = {}) {
     points: Array.isArray(record.points) ? record.points : [],
     charCount: record.charCount || 0,
     model: record.model || '',
+    // 写库时用的是哪一版分类体系。「重新分类」靠它筛出过期的记录 ——
+    // 改了 prompt 并升版本号之后，老记录会自动变成「待更新」，
+    // 不需要额外维护任何状态；也因此中断后重来不会重复处理。
+    promptVersion: record.promptVersion || '',
     attempts: record.attempts || 0,
     ocr: record.ocr || null,
     // 首次消化的时间不动 —— 「这篇是什么时候进来的」和「上次重读是什么时候」

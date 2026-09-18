@@ -13,7 +13,8 @@
 import { pingOllama } from './llm.js';
 import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
 import { digestDocument, rankBatch, buildProfile, buildActionPlan } from './digest.js';
-import { saveDigest, countDigests, listDigests, getDigest, searchDigests } from './store.js';
+import { saveDigest, countDigests, listDigests, getDigest, searchDigests, listStaleDigests } from './store.js';
+import { loadShared } from './shared.js';
 
 // ---------------------------------------------------------------------------
 // 侧栏行为
@@ -241,6 +242,8 @@ async function archiveResult(result, payload) {
       points: result.value.points,
       charCount: payload.source.charCount,
       model: result.meta?.model || '',
+      // 这一条是用哪版分类体系判的 —— 见 store.js 的 listStaleDigests
+      promptVersion: result.meta?.promptVersion || '',
       attempts: Array.isArray(result.attempts) ? result.attempts.length : 0,
       ocr: payload.ocr || null
     });
@@ -337,7 +340,8 @@ async function getLastDigest() {
 // 不传的是 ocr / model / attempts 这些排查用的东西（那些用 GET_ARCHIVE_BY_URL 拿）。
 async function searchArchive({ keyword = '', category = '', limit = 30, before = null } = {}) {
   try {
-    const [result, total] = await Promise.all([
+    const [{ prompt }, result, total] = await Promise.all([
+      loadShared(),
       searchDigests({ keyword, category, limit, before }),
       countDigests()
     ]);
@@ -347,6 +351,8 @@ async function searchArchive({ keyword = '', category = '', limit = 30, before =
       total,
       hasMore: result.hasMore,
       nextBefore: result.nextBefore,
+      // 当前分类体系版本 —— 侧栏拿它和每条记录的版本比，判断哪些是「旧分类」
+      version: prompt.version,
       rows: result.rows.map((r) => ({
         key: r.key,
         url: r.url,
@@ -357,8 +363,31 @@ async function searchArchive({ keyword = '', category = '', limit = 30, before =
         points: r.points || [],
         digestedAt: r.digestedAt,
         firstDigestedAt: r.firstDigestedAt,
-        digestCount: r.digestCount || 1
+        digestCount: r.digestCount || 1,
+        promptVersion: r.promptVersion || ''
       }))
+    };
+  } catch (err) {
+    return { ok: false, error: `读归档失败：${err?.message || err}` };
+  }
+}
+
+// 重新分类：列出「分类体系比当前旧」的记录（只给 url / title，侧栏不需要别的）。
+//
+// 判断靠记录自身的 promptVersion，不依赖任何外部状态 ——
+// 所以中途关掉侧栏、下次再点，已经重跑过的会被自动排除，不会白跑第二遍。
+async function listStaleArchive() {
+  try {
+    const { prompt } = await loadShared();
+
+    const rows = await listStaleDigests({ version: prompt.version });
+
+    return {
+      ok: true,
+      version: prompt.version,
+      count: rows.length,
+      // 只回传重跑必需的两个字段 —— 几百条带摘要要点一起传没有意义
+      rows: rows.map((r) => ({ url: r.url, title: r.title, category: r.category }))
     };
   } catch (err) {
     return { ok: false, error: `读归档失败：${err?.message || err}` };
@@ -599,6 +628,7 @@ const HANDLERS = {
   GET_ARCHIVE_STATS: getArchiveStats,
   GET_ARCHIVE_BY_URL: getArchiveByUrl,
   SEARCH_ARCHIVE: searchArchive,
+  LIST_STALE_DIGESTS: listStaleArchive,
   RANK_BATCH: rankBatch,
   BUILD_PROFILE: buildProfileNow,
   GET_PROFILE: getProfile,

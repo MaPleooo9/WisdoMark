@@ -29,12 +29,16 @@ export function isFresh(record, now = Date.now()) {
 // digestWithOcr   —— 单条的 OCR 分叉处理（图文帖要先在侧栏做 OCR）。不传则遇到图文帖按失败处理
 // onProgress      —— 每步回调，UI 靠它更新
 // shouldStop      —— 返回 true 时在当前这一条跑完后停下
+// force           —— 跳过归档复用，强制重跑。重新分类用它（复用旧结果等于没重跑）
+// skipRanking     —— 跑完不排序。重新分类要的是「校正分类」，不是「排出优先级」
 export async function runBatchDigest({
   items = [],
   send,
   digestWithOcr,
   onProgress,
-  shouldStop
+  shouldStop,
+  force = false,
+  skipRanking = false
 } = {}) {
   const total = items.length;
   const results = [];
@@ -46,12 +50,15 @@ export async function runBatchDigest({
     await onProgress?.({ phase: 'checking', index, total, item });
 
     // 先问归档库。查不到 / 过期都不算错，继续走正常消化。
+    // force 时整段跳过 —— 重新分类的意义就是覆盖旧结果。
     let cached = null;
-    try {
-      const resp = await send('GET_ARCHIVE_BY_URL', { url: item.url });
-      if (resp?.ok && isFresh(resp.record)) cached = resp.record;
-    } catch {
-      /* 查询失败不影响主流程 */
+    if (!force) {
+      try {
+        const resp = await send('GET_ARCHIVE_BY_URL', { url: item.url });
+        if (resp?.ok && isFresh(resp.record)) cached = resp.record;
+      } catch {
+        /* 查询失败不影响主流程 */
+      }
     }
 
     if (cached) {
@@ -112,6 +119,9 @@ export async function runBatchDigest({
   if (!results.length) {
     return { ok: false, error: '这一批没有一条消化成功', results, skipped };
   }
+
+  // 重新分类要的是「分类被校正」，不是「排出优先级」—— 排序那一步纯属浪费
+  if (skipRanking) return { ok: true, results, skipped, ranked: null };
 
   await onProgress?.({ phase: 'ranking', total, ok: results.length, skipped: skipped.length });
 

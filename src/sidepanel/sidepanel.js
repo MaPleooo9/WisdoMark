@@ -52,6 +52,9 @@ const els = {
   archiveList: document.getElementById('archive-list'),
   archiveHint: document.getElementById('archive-hint'),
   btnArchiveMore: document.getElementById('btn-archive-more'),
+  reclassifyBox: document.getElementById('reclassify-box'),
+  reclassifyHint: document.getElementById('reclassify-hint'),
+  btnReclassify: document.getElementById('btn-reclassify'),
 
   // 我的画像
   profileNote: document.getElementById('profile-note'),
@@ -200,7 +203,11 @@ function switchPane(name) {
 
   // 归档面板每次切进来都重查一次：本地查询很快，而且用户刚消化完一篇切过来
   // 就该看到它。代价是分页回到第一页 —— 默认就 30 条，不常翻到后面。
-  if (name === 'archive') searchArchive();
+  if (name === 'archive') {
+    searchArchive();
+    // 顺便看一眼有没有「旧分类体系下判的」记录 —— 有才会显示那一行
+    refreshStaleState();
+  }
 }
 
 // 「点进去就全选」：粘下一条链接时不用先 Ctrl+A 把上一条清掉。
@@ -949,7 +956,6 @@ function buildArchiveItem(row) {
   // 老记录可能没有分类（阶段 1 落下时还没有这个字段），chip 会返回 null
   const chip = buildCategoryChip(row.category);
   if (chip) summary.append(chip);
-
   const wrap = el('div', 'archive-title-wrap');
   wrap.append(el('span', 'archive-title', row.title || '(无标题)'));
 
@@ -969,13 +975,24 @@ function buildArchiveItem(row) {
   if (row.summary) body.append(el('p', 'result-summary', row.summary));
   if (row.points?.length) body.append(buildPoints(row.points));
 
+  const actions = el('p', 'archive-actions');
+
   if (row.url) {
     const link = el('a', 'archive-link', '打开原文 ↗');
     link.href = row.url;
     link.target = '_blank';
     link.rel = 'noreferrer';
-    body.append(link);
+    actions.append(link);
   }
+
+  // 单条重跑：改了分类体系之后想校正某一篇时用它，不必等整库重扫
+  const redigestBtn = el('button', 'link-btn', '重新消化');
+  redigestBtn.type = 'button';
+  redigestBtn.title = '按当前的分类体系重跑这一篇';
+  redigestBtn.addEventListener('click', () => redigestOne(row, redigestBtn));
+  actions.append(redigestBtn);
+
+  body.append(actions);
 
   details.append(body);
   li.append(details);
@@ -993,6 +1010,153 @@ function debounce(fn, wait) {
 }
 
 const searchArchiveDebounced = debounce(() => searchArchive(), 250);
+
+// ---------------------------------------------------------------------------
+// 重新分类：把「旧分类体系下判的」记录按当前 prompt 重跑一遍
+// ---------------------------------------------------------------------------
+//
+// 哪些该重跑，完全由记录自己带的 promptVersion 决定（见 store.js 的 listStaleDigests）——
+// 不额外维护任何状态，于是：改了分类体系 → 老记录自动变成「待更新」；
+// 重跑过的记录写入新版本号 → **中途停掉、下次再点，跑过的不会白跑第二遍**。
+//
+// 这个性质很重要：库大了之后全量重跑要十几分钟，不可能要求用户一次跑完。
+
+let staleCount = 0;
+let staleRows = [];
+let reclassifyRunning = false;
+let reclassifyAbort = false;
+
+async function refreshStaleState() {
+  let resp;
+  try {
+    resp = await send('LIST_STALE_DIGESTS');
+  } catch {
+    return; // 查不到就不显示这一块，不影响主流程
+  }
+
+  if (!resp?.ok) return;
+
+  staleCount = resp.count || 0;
+  staleRows = resp.rows || [];
+
+  if (!staleCount) {
+    setHidden(els.reclassifyBox, true);
+    return;
+  }
+
+  setHidden(els.reclassifyBox, false);
+  // 每条约 15 秒（含抓取），给个量级就够 —— 用户要判断的是「现在点不点」
+  const mins = Math.max(1, Math.round((staleCount * 15) / 60));
+  els.reclassifyHint.className = 'hint';
+  els.reclassifyHint.textContent = `${staleCount} 条还是旧分类体系（约 ${mins} 分钟）。停了可以接着跑。`;
+}
+
+async function handleReclassify() {
+  // 再按一次 = 停下。和批量一样的语义：跑完当前这条，不强杀正在进行的模型调用
+  if (reclassifyRunning) {
+    reclassifyAbort = true;
+    els.reclassifyHint.textContent = '正在停下…（当前这条跑完就停，重跑过的都存好了）';
+    return;
+  }
+
+  if (!staleRows.length) {
+    await refreshStaleState();
+    if (!staleRows.length) {
+      setHidden(els.reclassifyBox, true);
+      return;
+    }
+  }
+
+  reclassifyRunning = true;
+  reclassifyAbort = false;
+  els.btnReclassify.textContent = '停止（跑完当前这条）';
+
+  const startedAt = Date.now();
+  let done = 0;
+
+  let outcome;
+  try {
+    outcome = await runBatchDigest({
+      items: staleRows,
+      send,
+      digestWithOcr,
+      shouldStop: () => reclassifyAbort,
+      // 复用归档结果 = 等于没重跑，所以必须强制
+      force: true,
+      // 要的是「分类被校正」，不是「排出优先级」—— 省掉最后一次模型调用
+      skipRanking: true,
+      onProgress: ({ phase, index, total }) => {
+        if (phase === 'done') done += 1;
+        const seconds = ((Date.now() - startedAt) / 1000).toFixed(0);
+        els.reclassifyHint.textContent =
+          `第 ${index + 1}/${total} 条 · ${BATCH_PHASE_LABEL[phase] || phase} · 已重跑 ${done} 条 · ${seconds} 秒`;
+      }
+    });
+  } finally {
+    reclassifyRunning = false;
+    els.btnReclassify.textContent = '重新分类';
+  }
+
+  const seconds = ((Date.now() - startedAt) / 1000).toFixed(0);
+
+  if (outcome.stopped) {
+    els.reclassifyHint.className = 'hint';
+    els.reclassifyHint.textContent = `已停下，这次重跑了 ${done} 条。再点一次会接着跑剩下的。`;
+  } else if (!outcome.ok) {
+    els.reclassifyHint.className = 'hint is-fail';
+    els.reclassifyHint.textContent = outcome.error || '重新分类失败。';
+  } else {
+    const failNote = outcome.skipped.length ? `，${outcome.skipped.length} 条没成功` : '';
+    els.reclassifyHint.className = 'hint';
+    els.reclassifyHint.textContent = `完成：重跑 ${done} 条${failNote}，用了 ${seconds} 秒。`;
+  }
+
+  // 列表和过期状态一起刷新（跑过的记录分类可能已经变了）
+  await searchArchive();
+  await refreshStaleState();
+}
+
+// 单条「重新消化」：只重跑这一篇。想校正某一条时不必跑整库。
+async function redigestOne(row, btn) {
+  btn.disabled = true;
+  btn.textContent = '重新消化中…';
+
+  let resp;
+  try {
+    // quiet：不要覆盖侧栏顶部「最近一次结果」那张卡片
+    resp = await send('DIGEST_URL', { url: row.url, quiet: true });
+  } catch (err) {
+    resp = { ok: false, error: err?.message || String(err) };
+  }
+
+  // 图文帖要和单条消化走同一条分叉，否则这类条目会整条失败
+  if (resp?.needOcr && typeof digestWithOcr === 'function') {
+    try {
+      resp = await digestWithOcr(resp.ocr, { quiet: true });
+    } catch (err) {
+      resp = { ok: false, error: `OCR 失败：${err?.message || err}` };
+    }
+  }
+
+  btn.disabled = false;
+  btn.textContent = '重新消化';
+
+  const okNow = resp?.ok === true && resp.value?.ok === true;
+  const newCategory = okNow ? resp.value.category : '';
+  const errText = okNow ? '' : resp?.error || resp?.value?.reason || '未知原因';
+
+  await searchArchive();
+  await refreshStaleState();
+
+  // 结果写在列表下方的提示里 —— 列表刚被重建过，写按钮上会被冲掉
+  if (okNow) {
+    els.archiveHint.className = 'hint';
+    els.archiveHint.textContent = `已重跑「${row.title || row.url}」→ 分到「${newCategory}」`;
+  } else {
+    els.archiveHint.className = 'hint is-fail';
+    els.archiveHint.textContent = `重新消化失败：${errText}`;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 结果渲染
@@ -1657,6 +1821,7 @@ async function init() {
   els.archiveKeyword.addEventListener('input', searchArchiveDebounced);
   els.archiveCategory.addEventListener('change', () => searchArchive());
   els.btnArchiveMore.addEventListener('click', () => searchArchive({ more: true }));
+  els.btnReclassify.addEventListener('click', handleReclassify);
   els.btnRefreshFolders.addEventListener('click', handleRefreshFolders);
   els.batchFolder.addEventListener('change', () => {
     chrome.storage.local.set({ [BATCH_FOLDER_STORE_KEY]: els.batchFolder.value }).catch(() => {});
