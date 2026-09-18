@@ -750,6 +750,11 @@ body {
   color: #c2326f;
 }
 
+.result-category[data-category="生活常识"] {
+  background: #f3eefd;
+  color: #6b46c1;
+}
+
 .result-category[data-category="其他"] {
   background: #f0f1f4;
   color: #5b6472;
