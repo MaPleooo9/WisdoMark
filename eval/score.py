@@ -31,6 +31,18 @@ def load():
         dataset = json.load(f)
     with io.open(os.path.join(EVAL, 'results.json'), encoding='utf-8') as f:
         results = json.load(f)
+
+    # **金标准以 cases.json 为准**，不能用 results.json 里那份。
+    # 后者是跑分当时的快照；裁判改了金标准之后还拿旧值打分的话，
+    # 「跑分与打分分开」就白设计了 —— 每次都要重跑五分钟的模型。
+    cases_by_id = {c['id']: c for c in dataset['cases']}
+    for r in results['results']:
+        c = cases_by_id.get(r['id'])
+        if c:
+            r['expect'] = c['expect']
+            r['title'] = c['title']
+            r['url'] = c['url']
+
     return dataset, results
 
 
@@ -140,10 +152,10 @@ def report(dataset, results, m):
     L.append('')
 
     if m['miss'] or m['refused']:
-        L.append('## 需要人工裁决的分歧')
+        L.append('## 与金标准不一致的条目')
         L.append('')
-        L.append('下表的「期望」是初标值，**不是金标准**。分类判据本身可能有歧义，')
-        L.append('需要逐条确认到底哪个对 —— 确认后的结果才是金标准，也才是下次跑分的基准。')
+        L.append('金标准已经过人工裁决，所以下面这些不是「待确认」，而是**模型的判断错了** ——')
+        L.append('它们正是下一轮改进判据的输入：每一条分歧都指向判据里某个没写清的边界。')
         L.append('')
 
         for r in m['miss'] + m['refused']:
@@ -151,9 +163,9 @@ def report(dataset, results, m):
             L.append('')
             L.append(f"- 链接：{r['url']}")
             if r['got']['ok'] is False:
-                L.append(f"- 初标：`{r['expect']['category']}`　模型：**判为不可消化**（{r['got'].get('reason')}）")
+                L.append(f"- 金标准：`{r['expect']['category']}`　模型：**判为不可消化**（{r['got'].get('reason')}）")
             else:
-                L.append(f"- 初标：`{r['expect']['category']}`　模型：`{r['got']['category']}`")
+                L.append(f"- 金标准：`{r['expect']['category']}`　模型：`{r['got']['category']}`")
             L.append(f"- 摘要：{r['got']['summary'][:160]}")
             L.append(f"- 要点 {len(r['got']['points'])} 条，第一条：{(r['got']['points'] or ['—'])[0][:80]}")
             L.append('')
@@ -192,10 +204,10 @@ def main():
     print()
 
     if m['miss']:
-        print('分类分歧（需要人工裁决）')
+        print('与金标准不一致（模型的失误，也是改进判据的线索）')
         print('─' * 46)
         for r in m['miss']:
-            print(f"  {r['id']:18s} 初标 {r['expect']['category']:6s} → 模型 {r['got']['category']}")
+            print(f"  {r['id']:18s} 金标准 {r['expect']['category']:6s} → 模型 {r['got']['category']}")
         print()
 
     print(f'报告已写入 {os.path.relpath(args.report, ROOT)}')
