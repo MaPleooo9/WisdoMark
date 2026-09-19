@@ -122,7 +122,128 @@
         "category": "技术学习"
       },
       "note": "收藏时标题就是站名，内容未知 —— 先抓下来再定"
+    },
+    {
+      "id": "probe-tool-app",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-tool-app",
+      "title": "试了三个月的待办 App，说说什么人适合用",
+      "text": "texts/probe-tool-app.txt",
+      "expect": {
+        "ok": true,
+        "category": "工具与产品"
+      },
+      "note": "盲点一的正向侧：推荐一个**具体**的 App，读者动作就是「决定装不装」"
+    },
+    {
+      "id": "probe-tech-ability",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-tech-ability",
+      "title": "提示词到底该怎么写：几个真的有用的原则",
+      "text": "texts/probe-tech-ability.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "盲点一的另一侧：讲的是一类能力/方法怎么做，能力来自 AI 工具但读者拿走的是方法"
+    },
+    {
+      "id": "probe-tool-compare",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-tool-compare",
+      "title": "三款主流笔记软件横向对比，我最后留下了哪个",
+      "text": "texts/probe-tool-compare.txt",
+      "expect": {
+        "ok": true,
+        "category": "工具与产品"
+      },
+      "note": "盲点一的第三种形态：功能对比 —— 读者的动作还是「选哪个装」"
+    },
+    {
+      "id": "probe-life-buy",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-life-buy",
+      "title": "买人体工学椅，哪些参数是真的，哪些是话术",
+      "text": "texts/probe-life-buy.txt",
+      "expect": {
+        "ok": true,
+        "category": "生活常识"
+      },
+      "note": "盲点二：消费选购类的代表用例"
+    },
+    {
+      "id": "probe-life-health",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-life-health",
+      "title": "久坐腰疼，先别急着买护腰",
+      "text": "texts/probe-life-health.txt",
+      "expect": {
+        "ok": true,
+        "category": "生活常识"
+      },
+      "note": "盲点二：健康类，判据里明确写了「健康」"
+    },
+    {
+      "id": "probe-life-food",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-life-food",
+      "title": "冰箱里哪些东西不该放在一起",
+      "text": "texts/probe-life-food.txt",
+      "expect": {
+        "ok": true,
+        "category": "生活常识"
+      },
+      "note": "盲点二：饮食类，判据里明确写了「饮食」"
+    },
+    {
+      "id": "probe-life-gpu",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-life-gpu",
+      "title": "二手显卡怎么挑：几个必看的检查点",
+      "text": "texts/probe-life-gpu.txt",
+      "expect": {
+        "ok": true,
+        "category": "生活常识"
+      },
+      "note": "盲点二最尖锐的一条：买的是**游戏硬件**，但正文讲的是「怎么挑一件日用品」。这一条直接检验新加的「买东西怎么挑算生活常识」有没有生效，同时看它会不会被游戏娱乐或工具与产品抢走"
+    },
+    {
+      "id": "probe-news-tutorial",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-news-tutorial",
+      "title": "某开源模型发布 70B 版本，官方同步放出微调教程",
+      "text": "texts/probe-news-tutorial.txt",
+      "expect": {
+        "ok": true,
+        "category": "资讯与公告"
+      },
+      "note": "资讯与公告 / 技术学习的边界：判据明说「即使披露大量技术细节，也仍归资讯与公告」——这次还带了教程，是最容易被技术学习抢走的一条"
+    },
+    {
+      "id": "probe-misc-career",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-misc-career",
+      "title": "入职半年才明白的几件事",
+      "text": "texts/probe-misc-career.txt",
+      "expect": {
+        "ok": true,
+        "category": "其他"
+      },
+      "note": "其他 / 技术学习：职场经验分享，没有任何技术对象"
+    },
+    {
+      "id": "probe-tech-method",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-tech-method",
+      "title": "接口设计里的几个取舍，踩过才知道",
+      "text": "texts/probe-tech-method.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "技术学习 / 其他：讲方法但没有代码和命令，靠「系统与架构的技术细节」站住 ——这条验证技术学习的新判据（必须有技术对象）会不会过严"
     }
   ],
-  "_reviewed": "金标准已经过人工裁决（2026-09-19）。expect 是裁判后的结果，不是初标值。"
+  "_reviewed": "金标准已经过人工裁决（2026-09-19）。expect 是裁判后的结果，不是初标值。",
+  "_probeNote": "source: probe 的是**合成**的边界探针，专打判据的模糊地带；source: bookmark 的是真实内容。报告里两者分开统计 —— 真实集说明「在实际内容上的表现」，探针集说明「在判据边界上的表现」。"
 }

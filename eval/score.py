@@ -63,6 +63,15 @@ def compute(results):
     retried = [r for r in done if (r.get('attempts') or 0) > 1]
     times = [r['elapsedMs'] for r in done if r.get('elapsedMs')]
 
+    # 真实内容与合成探针分开统计：两者说明的是不同的事，
+    # 合在一起算会让「探针很多」把真实表现稀释掉。
+    by_source = {}
+    for src, label in (('bookmark', '真实内容'), ('probe', '边界探针')):
+        subset = [r for r in digestible if r.get('source') == src]
+        if subset:
+            h = [r for r in subset if r['got']['category'] == r['expect']['category']]
+            by_source[src] = {'label': label, 'hit': len(h), 'total': len(subset)}
+
     return {
         'total': len(rows),
         'callFailed': call_failed,
@@ -73,6 +82,7 @@ def compute(results):
         'hit': hit,
         'miss': [r for r in digestible if r['got']['category'] != r['expect']['category']],
         'retried': retried,
+        'bySource': by_source,
         'avgSec': (sum(times) / len(times) / 1000) if times else 0,
         'maxSec': (max(times) / 1000) if times else 0,
     }
@@ -120,6 +130,18 @@ def report(dataset, results, m):
              f"（{len(m['retried'])}/{len(m['done'])}）| 需要重试才通过，反映 prompt 稳定性 |")
     L.append(f"| 平均耗时 | {m['avgSec']:.1f} 秒 | 单条 |")
     L.append(f"| 最长耗时 | {m['maxSec']:.1f} 秒 | 单条 |")
+    L.append('')
+
+    L.append('## 分组表现')
+    L.append('')
+    L.append('| 来源 | 分类一致率 | 说明 |')
+    L.append('|---|---|---|')
+    for src in ('bookmark', 'probe'):
+        s = m['bySource'].get(src)
+        if not s:
+            continue
+        desc = '在实际内容上的表现' if src == 'bookmark' else '在判据边界上的表现（专打模糊地带）'
+        L.append(f"| {s['label']} | {pct(s['hit'], s['total'])} （{s['hit']}/{s['total']}） | {desc} |")
     L.append('')
 
     L.append('## 逐条明细')
