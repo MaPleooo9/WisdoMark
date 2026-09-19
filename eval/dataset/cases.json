@@ -1,0 +1,127 @@
+{
+  "_comment": "阶段 3 的评测集。正文存快照（texts/<id>.txt）而不是每次现抓 —— 网站改版、文章被删之后评测仍要能重跑，否则分数不可复现。",
+  "version": "1.0.0",
+  "_expectSemantics": "expect 是金标准。category 由人工评审确定（先给建议值、再由本人确认或修正），不是模型自己的输出。ok:false 表示这一页本来就不该被消化（登录页这类）。",
+  "cases": [
+    {
+      "id": "life-sneeze",
+      "source": "bookmark",
+      "url": "https://www.xiaoheihe.cn/app/bbs/link/06af727385cd",
+      "title": "吃烫的就流鼻涕，到底是什么原因？",
+      "text": "texts/life-sneeze.txt",
+      "expect": {
+        "ok": true,
+        "category": "生活常识"
+      },
+      "note": "用户明确提到的这篇；也是加「生活常识」这个类的直接起因"
+    },
+    {
+      "id": "tech-skills",
+      "source": "bookmark",
+      "url": "https://mp.weixin.qq.com/s/qsLbJuYOIIucRaCPv10FVQ",
+      "title": "安装 WorkBuddy 后我觉得必装的 Skills，附实操资料包分享。",
+      "text": "texts/tech-skills.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "公众号；单一主题的并列清单（N 个 skill）—— 测「条数跟随原文条目数」"
+    },
+    {
+      "id": "news-ios27",
+      "source": "bookmark",
+      "url": "https://mp.weixin.qq.com/s/yng-2zxXEctoATNsj9SljQ",
+      "title": "iOS 27 正式版更新：闹钟支持调休了",
+      "text": "texts/news-ios27.txt",
+      "expect": {
+        "ok": true,
+        "category": "资讯与公告"
+      },
+      "note": "版本更新公告 —— 测「只需知道有这么回事」，也测它不会被判成工具与产品"
+    },
+    {
+      "id": "tool-clippi",
+      "source": "bookmark",
+      "url": "https://xiaoheihe.cn/app/bbs/link/186579461",
+      "title": "很多人不知道 Windows 自带剪贴板历史记录，为什么还需要 Clippi？",
+      "text": "texts/tool-clippi.txt",
+      "expect": {
+        "ok": true,
+        "category": "工具与产品"
+      },
+      "note": "工具推荐 —— 判据是「读完会去装它用它」"
+    },
+    {
+      "id": "tool-ppt",
+      "source": "bookmark",
+      "url": "https://xiaoheihe.cn/app/bbs/link/189330418",
+      "title": "AI 做 PPT 不稀奇，能改才是本事，开源 PPT 项目",
+      "text": "texts/tool-ppt.txt",
+      "expect": {
+        "ok": true,
+        "category": "工具与产品"
+      },
+      "note": "开源项目推荐"
+    },
+    {
+      "id": "tech-ai-terms",
+      "source": "bookmark",
+      "url": "https://www.xiaoheihe.cn/app/bbs/link/d58a7274e249",
+      "title": "想玩 AI 却看不懂术语？帮电脑萌新快速扫盲！",
+      "text": "texts/tech-ai-terms.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "术语科普 —— 边界：它讲的是技术概念，应当归技术学习而不是其他"
+    },
+    {
+      "id": "life-gamepad",
+      "source": "bookmark",
+      "url": "https://www.xiaoheihe.cn/app/bbs/link/dc2b710dcc7a",
+      "title": "二手手柄选购新手攻略",
+      "text": "texts/life-gamepad.txt",
+      "expect": {
+        "ok": true,
+        "category": "生活常识"
+      },
+      "note": "选购攻略 —— 边界：主题沾游戏，但讲的是「怎么挑一个日用品」，判序第一步（游戏类）要经得起这一条"
+    },
+    {
+      "id": "agg-weekly",
+      "source": "bookmark",
+      "url": "https://www.ruanyifeng.com/blog/2024/04/weekly-issue-296.html",
+      "title": "科技爱好者周刊（第 296 期）",
+      "text": "texts/agg-weekly.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "聚合类（周刊）—— 测「按主题归纳」而不是逐条罗列；也是之前唯一测过形态判断的样本"
+    },
+    {
+      "id": "tech-obsidian",
+      "source": "bookmark",
+      "url": "https://www.bilibili.com/opus/1207471875696885761",
+      "title": "把 AI agent 接入 obsidian 笔记库",
+      "text": "texts/tech-obsidian.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "B 站图文帖（opus）—— 正文很可能整段在图片里，是 OCR 链路的真实样本"
+    },
+    {
+      "id": "misc-mp-generic",
+      "source": "bookmark",
+      "url": "https://mp.weixin.qq.com/s/aueO_ZIcfwfrIrMzCSJuSg",
+      "title": "有没有好奇过 DeepSeek 的「缓存命中」和「缓存未命中」是什么意思？",
+      "text": "texts/misc-mp-generic.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "收藏时标题就是站名，内容未知 —— 先抓下来再定"
+    }
+  ]
+}

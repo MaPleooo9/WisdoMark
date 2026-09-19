@@ -1,6 +1,10 @@
 # AI 协作工具的本地记忆目录（不入公开仓库）
 .workbuddy/
 
+# 评测集的正文快照 —— 那是别人文章的全文，放公开仓库属于转载。
+# clone 之后跑 `node eval/fetch.mjs` 重新抓一份即可（脚本和金标准都在仓库里）。
+eval/dataset/texts/
+
 # 依赖与构建产物
 node_modules/
 dist/
