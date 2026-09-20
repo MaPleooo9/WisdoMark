@@ -242,8 +242,79 @@
         "category": "技术学习"
       },
       "note": "技术学习 / 其他：讲方法但没有代码和命令，靠「系统与架构的技术细节」站住 ——这条验证技术学习的新判据（必须有技术对象）会不会过严"
+    },
+    {
+      "id": "neg-login",
+      "source": "negative",
+      "url": "https://example.com/probe/neg-login",
+      "title": "统一身份认证",
+      "text": "texts/neg-login.txt",
+      "expect": {
+        "ok": false,
+        "category": null
+      },
+      "note": "登录页 —— 护栏的核心用例，AGENTS.md 里写了判据却一直没进评测集"
+    },
+    {
+      "id": "neg-captcha",
+      "source": "negative",
+      "url": "https://example.com/probe/neg-captcha",
+      "title": "安全验证",
+      "text": "texts/neg-captcha.txt",
+      "expect": {
+        "ok": false,
+        "category": null
+      },
+      "note": "人机验证页 —— 判据里「验证码 / 权限校验页」的形态"
+    },
+    {
+      "id": "neg-404",
+      "source": "negative",
+      "url": "https://example.com/probe/neg-404",
+      "title": "页面不存在",
+      "text": "texts/neg-404.txt",
+      "expect": {
+        "ok": false,
+        "category": null
+      },
+      "note": "错误页 —— 判据里「错误页 / 404」的形态"
+    },
+    {
+      "id": "neg-nav",
+      "source": "negative",
+      "url": "https://example.com/probe/neg-nav",
+      "title": "小黑盒 - 玩家高能聚集地",
+      "text": "texts/neg-nav.txt",
+      "expect": {
+        "ok": false,
+        "category": null
+      },
+      "note": "纯导航页 —— 判据里「纯导航或目录页」的形态；也是当初真实踩过的那个坑（SPA 空壳）"
+    },
+    {
+      "id": "neg-cookie",
+      "source": "negative",
+      "url": "https://example.com/neg-cookie",
+      "title": "Cookie 设置",
+      "text": "texts/neg-cookie.txt",
+      "expect": {
+        "ok": false
+      },
+      "note": "Cookie 与隐私提示页 —— 判据白名单"
+    },
+    {
+      "id": "neg-loading",
+      "source": "negative",
+      "url": "https://example.com/neg-loading",
+      "title": "正在加载",
+      "text": "texts/neg-loading.txt",
+      "expect": {
+        "ok": false
+      },
+      "note": "正文为空或只有寥寥几个字 —— 判据白名单的最后一条，也最容易漏（它长得像正常页面，只是内容还没出来）"
     }
   ],
   "_reviewed": "金标准已经过人工裁决（2026-09-19，三轮）。expect 是裁判后的结果，不是初标值。",
-  "_probeNote": "source: probe 的是**合成**的边界探针，专打判据的模糊地带；source: bookmark 的是真实内容。报告里两者分开统计 —— 真实集说明「在实际内容上的表现」，探针集说明「在判据边界上的表现」。"
+  "_probeNote": "source: probe 的是**合成**的边界探针，专打判据的模糊地带；source: bookmark 的是真实内容。报告里两者分开统计 —— 真实集说明「在实际内容上的表现」，探针集说明「在判据边界上的表现」。",
+  "_negativeNote": "source: negative 的是**不该被消化**的页面（登录页、错误页等）。它们不进「分类一致率」的分母 —— 判它们 ok:false 才是对的。对应指标是「误纳率」：不该消化的被消化了。"
 }

@@ -46,6 +46,26 @@ def load():
     return dataset, results
 
 
+def wilson(hit, total, z=1.96):
+    """二项比例的 Wilson 置信区间。
+
+    20 条里对 19 条是 95%，但这个比例的 95% 区间宽达 [76%, 99%] ——
+    光报点估计会让人高估结论强度。把区间摆出来，比被问「样本够吗」要主动。
+    """
+    if not total:
+        return (0.0, 0.0)
+    p = hit / total
+    d = 1 + z * z / total
+    center = (p + z * z / (2 * total)) / d
+    half = z * ((p * (1 - p) / total + z * z / (4 * total * total)) ** 0.5) / d
+    return (max(0.0, center - half), min(1.0, center + half))
+
+
+def ci_text(hit, total):
+    lo, hi = wilson(hit, total)
+    return f'[{lo * 100:.0f}%, {hi * 100:.0f}%]'
+
+
 def compute(results):
     rows = results['results']
 
@@ -53,31 +73,45 @@ def compute(results):
     call_failed = [r for r in rows if not r.get('ok')]
     done = [r for r in rows if r.get('ok')]
 
-    # 「本来该被消化」的：金标准 ok:true
+    # 正样本：该被消化的（金标准 ok:true）
     should_digest = [r for r in done if r['expect'].get('ok', True)]
     refused = [r for r in should_digest if r['got'] and r['got']['ok'] is False]
     digestible = [r for r in should_digest if r['got'] and r['got']['ok'] is not False]
-
     hit = [r for r in digestible if r['got']['category'] == r['expect']['category']]
+
+    # 负样本：本来就不该被消化的（登录页 / 验证码页 / 404 / 纯导航页）
+    should_refuse = [r for r in done if not r['expect'].get('ok', True)]
+    # 被判成「可以消化」= 误纳。比漏掉更糟：用户会拿到一段凭空生成的摘要，而且看不出来。
+    over_accepted = [r for r in should_refuse if r['got'] and r['got']['ok'] is not False]
 
     retried = [r for r in done if (r.get('attempts') or 0) > 1]
     times = [r['elapsedMs'] for r in done if r.get('elapsedMs')]
 
-    # 真实内容与合成探针分开统计：两者说明的是不同的事，
-    # 合在一起算会让「探针很多」把真实表现稀释掉。
+    # 三类用例分开统计：它们说明的是不同的事，
+    # 合在一起算会让「哪一类多」决定总分的高低。
     by_source = {}
     for src, label in (('bookmark', '真实内容'), ('probe', '边界探针')):
         subset = [r for r in digestible if r.get('source') == src]
         if subset:
             h = [r for r in subset if r['got']['category'] == r['expect']['category']]
-            by_source[src] = {'label': label, 'hit': len(h), 'total': len(subset)}
+            by_source[src] = {'label': label, 'hit': len(h), 'total': len(subset), 'kind': 'category'}
+
+    if should_refuse:
+        by_source['negative'] = {
+            'label': '负样本（不该消化）',
+            'hit': len(should_refuse) - len(over_accepted),
+            'total': len(should_refuse),
+            'kind': 'refuse',
+        }
 
     return {
         'total': len(rows),
         'callFailed': call_failed,
         'done': done,
         'shouldDigest': should_digest,
+        'shouldRefuse': should_refuse,
         'refused': refused,
+        'overAccepted': over_accepted,
         'digestible': digestible,
         'hit': hit,
         'miss': [r for r in digestible if r['got']['category'] != r['expect']['category']],
@@ -118,30 +152,45 @@ def report(dataset, results, m):
 
     L.append('## 指标')
     L.append('')
-    L.append('| 指标 | 结果 | 说明 |')
-    L.append('|---|---|---|')
+    L.append('| 指标 | 结果 | 95% Wilson 区间 | 说明 |')
+    L.append('|---|---|---|---|')
     L.append(f"| **分类一致率** | **{pct(len(m['hit']), len(m['digestible']))}** "
-             f"（{len(m['hit'])}/{len(m['digestible'])}）| 与金标准一致的条数 |")
+             f"（{len(m['hit'])}/{len(m['digestible'])}）| {ci_text(len(m['hit']), len(m['digestible']))} | "
+             f"正样本中与金标准一致的条数 |")
+    L.append(f"| **误纳率** | **{pct(len(m['overAccepted']), len(m['shouldRefuse']))}** "
+             f"（{len(m['overAccepted'])}/{len(m['shouldRefuse'])}）| — | "
+             f"不该消化的被消化了 —— 用户会拿到一段凭空生成的摘要，而且看不出来，**比漏掉更糟** |")
     L.append(f"| 误拒率 | {pct(len(m['refused']), len(m['shouldDigest']))} "
-             f"（{len(m['refused'])}/{len(m['shouldDigest'])}）| 该消化的被判成不可消化 |")
+             f"（{len(m['refused'])}/{len(m['shouldDigest'])}）| — | 该消化的被判成不可消化 |")
     L.append(f"| 调用失败率 | {pct(len(m['callFailed']), m['total'])} "
-             f"（{len(m['callFailed'])}/{m['total']}）| 没跑出结构（网络 / 校验反复不过）|")
+             f"（{len(m['callFailed'])}/{m['total']}）| — | 没跑出结构（网络 / 校验反复不过）|")
     L.append(f"| 重试率 | {pct(len(m['retried']), len(m['done']))} "
-             f"（{len(m['retried'])}/{len(m['done'])}）| 需要重试才通过，反映 prompt 稳定性 |")
-    L.append(f"| 平均耗时 | {m['avgSec']:.1f} 秒 | 单条 |")
-    L.append(f"| 最长耗时 | {m['maxSec']:.1f} 秒 | 单条 |")
+             f"（{len(m['retried'])}/{len(m['done'])}）| — | 需要重试才通过，反映 prompt 稳定性 |")
+    L.append(f"| 平均耗时 | {m['avgSec']:.1f} 秒 | — | 单条 |")
+    L.append(f"| 最长耗时 | {m['maxSec']:.1f} 秒 | — | 单条 |")
+    L.append('')
+    L.append(f"> 分类一致率的 95% Wilson 区间是 **{ci_text(len(m['hit']), len(m['digestible']))}** ——")
+    L.append(f"> 用例只有 {m['total']} 条，区间偏宽，**分数只看趋势，不要当精确值**。")
+    L.append('> 区间不是「不确定性」的免责声明，而是让读者知道这个数字能支撑多强的结论。')
     L.append('')
 
     L.append('## 分组表现')
     L.append('')
-    L.append('| 来源 | 分类一致率 | 说明 |')
-    L.append('|---|---|---|')
-    for src in ('bookmark', 'probe'):
+    L.append('| 来源 | 通过率 | 95% Wilson 区间 | 说明 |')
+    L.append('|---|---|---|---|')
+    descs = {
+        'bookmark': '在实际内容上的表现',
+        'probe': '在判据边界上的表现（专打模糊地带）',
+        'negative': '**该拦下的有没有被拦下**（登录页 / 验证码页 / 404 / 纯导航页）',
+    }
+    for src in ('bookmark', 'probe', 'negative'):
         s = m['bySource'].get(src)
         if not s:
             continue
-        desc = '在实际内容上的表现' if src == 'bookmark' else '在判据边界上的表现（专打模糊地带）'
-        L.append(f"| {s['label']} | {pct(s['hit'], s['total'])} （{s['hit']}/{s['total']}） | {desc} |")
+        L.append(f"| {s['label']} | {pct(s['hit'], s['total'])} （{s['hit']}/{s['total']}） | "
+                 f"{ci_text(s['hit'], s['total'])} | {descs[src]} |")
+    L.append('')
+    L.append('> 三类分开看的原因：它们回答的是不同的问题，合在一起算等于让「哪类用例多」决定总分。')
     L.append('')
 
     L.append('## 逐条明细')
@@ -155,19 +204,27 @@ def report(dataset, results, m):
             continue
 
         got = r['got']
-        if got['ok'] is False:
-            verdict = '⛔ 判为不可消化'
-            cat = 'ok:false'
-        elif got['category'] == r['expect']['category']:
-            verdict = '✅'
-            cat = got['category']
+        is_negative = not r['expect'].get('ok', True)
+
+        if is_negative:
+            # 负样本：通过 = 被正确拦下
+            exp_label = '`ok:false`'
+            if got['ok'] is False:
+                verdict, cat = '✅ 正确拦下', '`ok:false`'
+            else:
+                verdict, cat = '⚠️ **误纳**', got['category'] or '—'
         else:
-            verdict = '⚠️ 分歧'
-            cat = got['category']
+            exp_label = r['expect']['category']
+            if got['ok'] is False:
+                verdict, cat = '⛔ 判为不可消化', '`ok:false`'
+            elif got['category'] == r['expect']['category']:
+                verdict, cat = '✅', got['category']
+            else:
+                verdict, cat = '⚠️ 分歧', got['category']
 
         retry = f"（重试 {r['attempts'] - 1}）" if r.get('attempts', 1) > 1 else ''
         L.append(
-            f"| `{r['id']}` | {r['expect']['category']} | {cat} | {verdict} | "
+            f"| `{r['id']}` | {exp_label} | {cat} | {verdict} | "
             f"{r.get('chars', '—')} | {r['elapsedMs'] / 1000:.0f}s{retry} |"
         )
 
@@ -217,9 +274,13 @@ def main():
         f.write(text + '\n')
 
     print('指标')
-    print('─' * 46)
-    print(f"  分类一致率   {pct(len(m['hit']), len(m['digestible']))}  ({len(m['hit'])}/{len(m['digestible'])})")
-    print(f"  误拒率       {pct(len(m['refused']), len(m['shouldDigest']))}  ({len(m['refused'])}/{len(m['shouldDigest'])})")
+    print('─' * 54)
+    print(f"  分类一致率   {pct(len(m['hit']), len(m['digestible']))}  ({len(m['hit'])}/{len(m['digestible'])})"
+          f"  95% CI {ci_text(len(m['hit']), len(m['digestible']))}")
+    print(f"  误纳率       {pct(len(m['overAccepted']), len(m['shouldRefuse']))}  "
+          f"({len(m['overAccepted'])}/{len(m['shouldRefuse'])})   不该消化的被消化了")
+    print(f"  误拒率       {pct(len(m['refused']), len(m['shouldDigest']))}  "
+          f"({len(m['refused'])}/{len(m['shouldDigest'])})   该消化的被判成不可消化")
     print(f"  调用失败率   {pct(len(m['callFailed']), m['total'])}  ({len(m['callFailed'])}/{m['total']})")
     print(f"  重试率       {pct(len(m['retried']), len(m['done']))}  ({len(m['retried'])}/{len(m['done'])})")
     print(f"  平均耗时     {m['avgSec']:.1f} 秒 / 最长 {m['maxSec']:.1f} 秒")
