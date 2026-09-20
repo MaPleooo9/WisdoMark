@@ -312,6 +312,18 @@
         "ok": false
       },
       "note": "正文为空或只有寥寥几个字 —— 判据白名单的最后一条，也最容易漏（它长得像正常页面，只是内容还没出来）"
+    },
+    {
+      "id": "tool-ai-restraint",
+      "source": "bookmark",
+      "url": "https://www.xiaoheihe.cn/app/bbs/link/d8e67277a447",
+      "title": "别再造史了！stop-that-shit，专治AI自作主张",
+      "text": "texts/tool-ai-restraint.txt",
+      "expect": {
+        "ok": true,
+        "category": "工具与产品"
+      },
+      "note": "作者 2026-09-20 新收藏的一条（收藏夹 22 → 23）。看过正文确认分类：介绍开源项目 stop-that-shit —— 一个在 AI 编程工具动手前拦截「自作主张」的 Hook，有安装命令、支持的工具列表、用法示例 → **工具与产品**（读者动作是「决定装不装」）。"
     }
   ],
   "_reviewed": "金标准已经过人工裁决（2026-09-19，三轮）。expect 是裁判后的结果，不是初标值。",

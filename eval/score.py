@@ -36,7 +36,7 @@ def load():
     # 后者是跑分当时的快照；裁判改了金标准之后还拿旧值打分的话，
     # 「跑分与打分分开」就白设计了 —— 每次都要重跑五分钟的模型。
     cases_by_id = {c['id']: c for c in dataset['cases']}
-    for r in results['results']:
+    for r in (results.get('rows') or results.get('results') or []):
         c = cases_by_id.get(r['id'])
         if c:
             r['expect'] = c['expect']
@@ -67,7 +67,36 @@ def ci_text(hit, total):
 
 
 def compute(results):
-    rows = results['results']
+    raw = results.get('rows') or results.get('results') or []
+
+    # ---- 多轮结果摊平成「一条用例一个代表结果」----
+    # 代表结果取**多数表决**（平票取较早那轮），这样下面所有指标逻辑都能直接复用。
+    # passes / validRuns / verdict 留着，供「多轮稳定性」那一节单独统计。
+    from collections import Counter as _C
+
+    def label_of(x):
+        g = x.get('got')
+        if not g:
+            return '__error__'
+        return 'ok:false' if g.get('ok') is False else (g.get('category') or '__unknown__')
+
+    rows = []
+    for r in raw:
+        runs = [x for x in (r.get('runs') or []) if x.get('ok') and x.get('got')]
+        if not runs:
+            rows.append({**r, 'ok': False, 'error': '没有有效运行', 'got': None})
+            continue
+
+        top = _C(label_of(x) for x in runs).most_common(1)[0][0]
+        rep = next((x for x in runs if label_of(x) == top), runs[0])
+        rows.append({
+            **r,
+            'ok': True,
+            'error': None,
+            'got': rep['got'],
+            'elapsedMs': rep.get('elapsedMs'),
+            'attempts': rep.get('attempts', 1),
+        })
 
     # 只统计跑出结果的条目；调用失败单独算
     call_failed = [r for r in rows if not r.get('ok')]
@@ -104,6 +133,34 @@ def compute(results):
             'kind': 'refuse',
         }
 
+    # ---- 多轮稳定性 ----
+    # 单次一致率只是个点估计，真正说明问题的是「这条用例稳不稳」。
+    # 翻转的最值得改判据 —— 它们精确指出哪句话没兜住。
+    from collections import Counter as _C2
+    verdicts = dict(_C2(r.get('verdictName') or r.get('verdict') for r in raw if r.get('verdict')))
+    flips = [r['id'] for r in raw if r.get('verdict') == 'flip']
+    stable_fails = [r['id'] for r in raw if r.get('verdict') == 'stable-fail']
+    repeat = results.get('meta', {}).get('repeat', 1)
+
+    # 每一轮单独算一次一致率 —— 轮次之间的波动比一个点估计诚实得多
+    per_round = []
+    for i in range(repeat):
+        h = t = 0
+        for r in raw:
+            runs = r.get('runs') or []
+            if i >= len(runs) or not runs[i].get('ok') or not runs[i].get('got'):
+                continue
+            if not r['expect'].get('ok', True):
+                continue
+            g = runs[i]['got']
+            if g.get('ok') is False:
+                continue
+            t += 1
+            if g.get('category') == r['expect']['category']:
+                h += 1
+        if t:
+            per_round.append((h, t))
+
     return {
         'total': len(rows),
         'callFailed': call_failed,
@@ -119,6 +176,11 @@ def compute(results):
         'bySource': by_source,
         'avgSec': (sum(times) / len(times) / 1000) if times else 0,
         'maxSec': (max(times) / 1000) if times else 0,
+        'repeat': repeat,
+        'verdicts': verdicts,
+        'flips': flips,
+        'stableFails': stable_fails,
+        'perRound': per_round,
     }
 
 
@@ -174,6 +236,36 @@ def report(dataset, results, m):
     L.append('> 区间不是「不确定性」的免责声明，而是让读者知道这个数字能支撑多强的结论。')
     L.append('')
 
+    if m['repeat'] > 1:
+        v = m['verdicts']
+        L.append('## 多轮稳定性')
+        L.append('')
+        L.append(f'每条用例跑了 **{m["repeat"]} 轮**。模型有随机性，单次一致率只是个点估计 ——')
+        L.append('真正说明问题的是「这条用例稳不稳定」。')
+        L.append('')
+        L.append('| 判定 | 条数 | 含义 |')
+        L.append('|---|---|---|')
+        L.append(f"| 稳定通过 | {v.get('stable-pass', 0)} | 每一轮都对，判据兜住了 |")
+        L.append(f"| **翻转** | {v.get('flip', 0)} | 时对时错 —— **判据在这条上没写清楚，最该改的是它** |")
+        L.append(f"| 稳定失败 | {v.get('stable-fail', 0)} | 每一轮都错，是真的有问题 |")
+        if v.get('error'):
+            L.append(f"| 调用失败 | {v.get('error', 0)} | 没跑出结构 |")
+        L.append('')
+
+        if m['flips']:
+            L.append('翻转的用例：' + '、'.join(f'`{x}`' for x in m['flips']))
+            L.append('')
+        if m['stableFails']:
+            L.append('稳定失败的用例：' + '、'.join(f'`{x}`' for x in m['stableFails']))
+            L.append('')
+        if m['perRound']:
+            rounds = '　'.join(f'第{i + 1}轮 {h}/{t}' for i, (h, t) in enumerate(m['perRound']))
+            L.append(f'每轮单独算的一致率：{rounds}')
+            L.append('')
+            L.append('> 轮次之间的差值就是「随机性有多大」。拿两个版本的单轮成绩比优劣，')
+            L.append('> 很可能只是抽到了运气不同的那一次。')
+            L.append('')
+
     L.append('## 分组表现')
     L.append('')
     L.append('| 来源 | 通过率 | 95% Wilson 区间 | 说明 |')
@@ -198,7 +290,7 @@ def report(dataset, results, m):
     L.append('| 用例 | 期望 | 得到 | 结果 | 字数 | 耗时 |')
     L.append('|---|---|---|---|---|---|')
 
-    for r in results['results']:
+    for r in (results.get('rows') or results.get('results') or []):
         if not r.get('ok'):
             L.append(f"| `{r['id']}` | — | — | ❌ 调用失败 | — | — |")
             continue
