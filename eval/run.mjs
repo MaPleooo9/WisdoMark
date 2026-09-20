@@ -14,10 +14,11 @@
 //
 // 用法：
 //   node eval/run.mjs                   跑一轮
-//   node eval/run.mjs --repeat 3        跑三轮（推荐，约 17 分钟）
+//   node eval/run.mjs --repeat 3        跑三轮（推荐，约 18 分钟）
 //   node eval/run.mjs --only id1,id2    只跑指定用例
 //
-// 产物：eval/results.json —— 原始结果，指标由 eval/score.py 算（跑分与打分分开）
+// 产物：eval/results.json —— **每轮结束就落盘**（中途看得见进度，被打断也不丢已跑的轮次）
+// 指标由 eval/score.py 算（跑分与打分分开）
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -65,7 +66,7 @@ try {
 
 console.log(
   `评测 ${cases.length} 篇 × ${REPEAT} 轮 · 模型由 shared/prompt.json 决定` +
-    (REPEAT > 1 ? `（约 ${Math.round((cases.length * REPEAT * 13) / 60)} 分钟）` : '')
+    (REPEAT > 1 ? `（约 ${Math.round((cases.length * REPEAT * 14) / 60)} 分钟）` : '')
 );
 
 const startedAll = Date.now();
@@ -86,6 +87,44 @@ const rows = cases.map((c) => {
     runs: []
   };
 });
+
+// 版本信息先读好 —— 每次落盘都要带上（分数必须能对上哪版 prompt / schema）
+const prompt = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared/prompt.json'), 'utf8'));
+const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared/output-schema.json'), 'utf8'));
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+
+// 落盘。partial=true 表示还有轮次没跑完（verdict 尚未计算，字段为 null）。
+function writeOut(partial = false) {
+  const payload = {
+    _comment:
+      'eval/run.mjs 的原始产物。指标由 score.py 算（跑分与打分分开，结果可复算）。每条用例的 runs 是重复运行的多轮结果。',
+    meta: {
+      ranAt: new Date().toISOString(),
+      elapsedSec: Number(((Date.now() - startedAll) / 1000).toFixed(0)),
+      partial,
+      repeat: REPEAT,
+      model: prompt.model?.name || '',
+      promptVersion: prompt.version,
+      schemaVersion: schema.version,
+      extensionVersion: manifest.version,
+      caseCount: cases.length
+    },
+    rows: rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      url: r.url,
+      source: r.source,
+      expect: r.expect,
+      chars: r.chars,
+      runs: r.runs,
+      validRuns: r.validRuns ?? null,
+      passes: r.passes ?? null,
+      verdict: r.verdict ?? null
+    }))
+  };
+
+  fs.writeFileSync(OUT, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+}
 
 for (let round = 0; round < REPEAT; round++) {
   if (REPEAT > 1) console.log(`\n───── 第 ${round + 1}/${REPEAT} 轮 ─────`);
@@ -126,7 +165,7 @@ for (let round = 0; round < REPEAT; round++) {
       got
     });
 
-    // 单轮时维持原来的逐条进度输出（多轮时太吵，只在每轮结束报一句）
+    // 单轮时逐条打印；多轮时太吵，只在每轮结束报一句
     if (REPEAT === 1) {
       const hit = got && got.ok && got.category === row.expect.category;
       const mark = !got ? '❌' : got.ok === false ? '⛔' : hit ? '✅' : '⚠️ ';
@@ -137,7 +176,10 @@ for (let round = 0; round < REPEAT; round++) {
     }
   }
 
-  if (REPEAT > 1) console.log(`  本轮完成 ${rows.filter((r) => !r.missing).length} 条`);
+  if (REPEAT > 1) {
+    console.log(`  本轮完成 ${rows.filter((r) => !r.missing).length} 条`);
+    writeOut(true); // 每轮落盘 —— 中途看得见，被打断也不丢
+  }
 }
 
 // ---- 派生「多轮判定」----
@@ -148,9 +190,7 @@ for (const row of rows) {
 
   row.validRuns = valid.length;
   row.passes = valid.filter((r) =>
-    row.expect.ok === false
-      ? r.got.ok === false
-      : r.got.ok && r.got.category === row.expect.category
+    row.expect.ok === false ? r.got.ok === false : r.got.ok && r.got.category === row.expect.category
   ).length;
 
   if (!valid.length) row.verdict = 'error';
@@ -171,41 +211,24 @@ if (REPEAT > 1) {
   console.log(`  稳定失败 ${fail.length} 条${fail.length ? '：' + fail.map((r) => r.id).join(', ') : ''}`);
   console.log(`  **翻转 ${flip.length} 条**${flip.length ? '：' + flip.map((r) => r.id).join(', ') : ''}`);
   if (flip.length) console.log('  （翻转的最值得改判据 —— 它们精确指出哪句话没兜住）');
+
+  // 每轮单独的一致率 —— 轮次之间的差值就是「随机性有多大」
+  console.log('\n  每轮单独的一致率：');
+  for (let i = 0; i < REPEAT; i++) {
+    let h = 0;
+    let t = 0;
+    for (const r of rows) {
+      if (!r.expect.ok) continue;
+      const run = r.runs[i];
+      if (!run || !run.ok || !run.got || run.got.ok === false) continue;
+      t += 1;
+      if (run.got.category === r.expect.category) h += 1;
+    }
+    if (t) console.log(`    第 ${i + 1} 轮 ${h}/${t} = ${((h / t) * 100).toFixed(0)}%`);
+  }
 }
 
-// 版本信息一起存下来 —— 分数必须能对上「哪版 prompt / 哪版 schema」
-const prompt = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared/prompt.json'), 'utf8'));
-const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared/output-schema.json'), 'utf8'));
-const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
-
-const payload = {
-  _comment:
-    'eval/run.mjs 的原始产物。指标由 score.py 算（跑分与打分分开，结果可复算）。每条用例的 runs 是重复运行的多轮结果；verdict 由 score.py 复核。',
-  meta: {
-    ranAt: new Date().toISOString(),
-    elapsedSec: Number(totalSec),
-    repeat: REPEAT,
-    model: prompt.model?.name || '',
-    promptVersion: prompt.version,
-    schemaVersion: schema.version,
-    extensionVersion: manifest.version,
-    caseCount: cases.length
-  },
-  rows: rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    url: r.url,
-    source: r.source,
-    expect: r.expect,
-    chars: r.chars,
-    runs: r.runs,
-    validRuns: r.validRuns,
-    passes: r.passes,
-    verdict: r.verdict
-  }))
-};
-
-fs.writeFileSync(OUT, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+writeOut(false);
 
 console.log(`\n总耗时 ${totalSec}s（${REPEAT} 轮），结果写入 eval/results.json`);
 console.log('下一句：python eval/score.py');
