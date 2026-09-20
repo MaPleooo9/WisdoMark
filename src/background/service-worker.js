@@ -156,6 +156,37 @@ function safeHost(url) {
 
 // 跑完流水线后落库。落的是完整结果（含 attempts），侧栏重开能还原，阶段 3 也用得上。
 async function digestAndStore(extracted) {
+  // Cookie / 隐私声明页：抓取侧已经认出它不是内容主体，这里直接结束，不调模型。
+  //
+  // 以前它会一路走到模型：低内容判定（lowContent）看着像个闸门，其实只影响 UI 的
+  // 文案，不拦调用 —— 模型被问了一次，判 ok:true，于是 archiveResult 把
+  // 「本网站使用必要 Cookie」当成一篇文章存进归档。用户在界面上看到的是一段
+  // 正常摘要，不会知道那是垃圾。
+  //
+  // 这类页面有明确的机械特征（正文短 + 全是 Cookie / 隐私话术），
+  // 能机械判的东西不该消耗一次模型调用。
+  if (extracted.consentWall) {
+    return {
+      ok: true,
+      value: { ok: false, reason: '这是一个 Cookie / 隐私声明页，没有正文主体' },
+      meta: null,
+      attempts: [],
+      source: {
+        title: extracted.title || '',
+        url: extracted.url || '',
+        charCount: extracted.charCount || 0,
+        origin: extracted.source || ''
+      },
+      extract: {
+        lowContent: true,
+        consentWall: extracted.consentWall,
+        loginWall: extracted.loginWall || null
+      },
+      ocr: null,
+      finishedAt: Date.now()
+    };
+  }
+
   // 图文帖：正文文字太少，干货在图里。这里先不调模型 —— 把图片清单交回侧栏，
   // 由它做本地 OCR，拼进正文后再走 DIGEST_TEXT 回来。模型只被调用一次。
   if (extracted.ocr?.needed) {
@@ -204,7 +235,8 @@ async function digestAndStore(extracted) {
       minChars: extracted.minChars || null,
       // 命中说明这一页卡在登录 / 权限校验界面（url / password / captcha / text 四种原因）。
       // UI 要给的下一步和「SPA 没渲染出来」完全不同，不能混着说。
-      loginWall: extracted.loginWall || null
+      loginWall: extracted.loginWall || null,
+      consentWall: extracted.consentWall || null
     },
     // OCR 的账要记清楚：识别了几张、丢了几张、补了多少字。
     // 用户看到摘要变了，得能查到是因为多喂了图片文字。

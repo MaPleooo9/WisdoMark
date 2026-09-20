@@ -1,10 +1,9 @@
 {
   "manifest_version": 3,
   "name": "WisdoMark",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "本地运行的收藏消化助手：读收藏 / 抓正文 / 提炼摘要与可行动清单。全本地，零云端。",
   "minimum_chrome_version": "114",
-
   "permissions": [
     "sidePanel",
     "tabs",
@@ -12,25 +11,20 @@
     "storage",
     "bookmarks"
   ],
-
   "host_permissions": [
     "http://localhost:11434/*",
     "*://*/*"
   ],
-
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
-
   "background": {
     "service_worker": "src/background/service-worker.js",
     "type": "module"
   },
-
   "action": {
     "default_title": "打开 WisdoMark 侧栏"
   },
-
   "side_panel": {
     "default_path": "src/sidepanel/sidepanel.html"
   }

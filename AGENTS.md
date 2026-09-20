@@ -207,6 +207,42 @@ Cookie / 隐私声明页有明确特征，本来就不该问模型 ——
 同为 20/21，但 1.12.0 是**跑过三轮验证的干净基线**，而 1.13.x 只跑过定向验证 2 轮 ——
 拿未验证的版本换掉已验证的版本，没有收益。
 
+**实施：把 Cookie 页挪到抓取侧拦（0.16.0）**
+
+查代码时顺带发现一个更基础的问题 —— **`lowContent` 看着像个闸门，其实不拦模型调用**：
+
+```js
+// page.js
+const lowContent = extracted.text.length < MIN_CONTENT_CHARS;   // 400
+```
+
+它只被透传给 UI（决定说「没抓到正文」还是「模型认为它不是内容主体」），
+而 `digestAndStore` 里 `digestDocument` 是**无条件调用**的。于是 218 字的 Cookie 页会：
+低内容判定为真 → 仍然调用模型 → 模型判 `ok:true` → `archiveResult` 落库。
+用户在界面上看到的是一段正常摘要，**不会知道那是垃圾**。
+
+（另外 `extractActivePage` 里 `lowContent: false` 是写死的 —— 用户主动点「当前页面」时
+不做长度闸门，这是有意的，所以那条路径连这个提示都没有。）
+
+改法两处，都在抓取侧：
+
+| 文件 | 改动 |
+|---|---|
+| `content-script.js` | 新增 `detectConsentWall(text)`：正文 < 300 字 **且** 含 cookie / 隐私话术。两个条件缺一不可 —— 长度条件防长文被误拦，关键词条件防普通短文被误拦 |
+| `service-worker.js` | `digestAndStore` 开头命中 `consentWall` 直接返回 `ok:false`，**不进入 `digestDocument`** |
+
+`loginWall` 没有跟着改：它有 `password` / `captcha` / `url` 这些强特征，可能命中正文很长的页面
+（比如账号设置页），无条件拦会误伤。Cookie 是另一种情况 —— 它的判据本身带了长度约束，
+命中就一定是短页面。
+
+验证 `wm-consent-test.mjs`（9/9，端到端）：声明页被认出且 `value.ok=false`、
+**`meta` 为空且 `attempts` 为 0**（证明没调模型）、归档没多出垃圾；
+讲 Cookie 机制的长文与不含 Cookie 的短文**都没被误拦**。
+
+> 断言用的是「返回里有没有模型痕迹」，不是耗时 —— 抓取侧本身有一段 6 秒前台兜底等待
+> （正文少于 400 字时触发），耗时区分不开「等渲染」和「等模型」。
+> 第一版拿耗时断言，8.6s 被判成失败，是**测试写错**不是产品问题。
+
 ---
 
 ### 抓正文：必须等页面渲染稳定，`complete` 不等于渲染完

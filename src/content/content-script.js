@@ -221,6 +221,20 @@ if (!window.__wisdomark) {
     return null;
   }
 
+  // Cookie / 隐私声明页。和登录页是同一类东西 —— 都在「讲这个网页自己」，
+  // 不是用户要的正文；但它没有密码框、URL 也不一定带特征，只能靠正文认。
+  //
+  // 为什么不交给模型判（实测）：这类页面在评测里跑三轮，模型 3/3 都判 ok:true，
+  // 摘要写「本网站使用必要Cookie维持基本功能」。它答得没错 —— 那确实是一段陈述句。
+  // 错的是把这个问题交给了它。has 明确机械特征的页面，抓取侧直接认掉。
+  const CONSENT_WALL_TEXT = /(cookie|隐私政策|隐私声明|隐私设置|个性化推荐)/i;
+  const CONSENT_MAX_CHARS = 300;
+
+  function detectConsentWall(text) {
+    // 长度条件不能省：一篇讲 Cookie 机制的长文是正常内容，不能被误拦。
+    return text.length < CONSENT_MAX_CHARS && CONSENT_WALL_TEXT.test(text) ? 'cookie' : null;
+  }
+
   window.__wisdomark = {
     extract() {
       const root = pickRoot();
@@ -239,7 +253,10 @@ if (!window.__wisdomark) {
         images: all.slice(0, MAX_IMAGES),
         imageTotal: all.length,
         // 命中说明这一页停在登录 / 权限校验界面 —— UI 该给的下一步和「没渲染出来」完全不同
-        loginWall: detectLoginWall()
+        loginWall: detectLoginWall(),
+        // 命中说明这一页是 Cookie / 隐私声明。它同样没有正文主体，
+        // 但下一步和「需要登录」无关，所以单独报一个信号。
+        consentWall: detectConsentWall(text)
       };
     }
   };
