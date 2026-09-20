@@ -16,6 +16,8 @@
 //   node eval/run.mjs                   跑一轮
 //   node eval/run.mjs --repeat 3        跑三轮（推荐，约 18 分钟）
 //   node eval/run.mjs --only id1,id2    只跑指定用例
+//   node eval/run.mjs --out 路径        把产物写到别处。**跑验证脚本时务必带上**，
+//                                      否则会覆盖 eval/results.json 里的完整基线
 //
 // 产物：eval/results.json —— **每轮结束就落盘**（中途看得见进度，被打断也不丢已跑的轮次）
 // 指标由 eval/score.py 算（跑分与打分分开）
@@ -25,7 +27,6 @@ import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const DATASET = path.join(ROOT, 'eval/dataset');
-const OUT = path.join(ROOT, 'eval/results.json');
 
 const argv = process.argv.slice(2);
 const opt = (name, fallback) => {
@@ -35,6 +36,12 @@ const opt = (name, fallback) => {
 
 const ONLY = opt('only', '') ? opt('only', '').split(',').map((s) => s.trim()) : null;
 const REPEAT = Math.max(1, Number(opt('repeat', 1)) || 1);
+
+// 产物路径。默认写 eval/results.json；用 --out 可以写到别处 ——
+// 跑定向验证（--only）时必须带上，否则会把完整基线覆盖掉。
+const OUT = opt('out', '')
+  ? path.resolve(process.cwd(), opt('out', ''))
+  : path.join(ROOT, 'eval/results.json');
 
 // ---- 给生产代码补上 Node 里缺的那点东西 ----
 globalThis.chrome = { runtime: { getURL: (p) => p } };
@@ -230,5 +237,7 @@ if (REPEAT > 1) {
 
 writeOut(false);
 
-console.log(`\n总耗时 ${totalSec}s（${REPEAT} 轮），结果写入 eval/results.json`);
+console.log(
+  `\n总耗时 ${totalSec}s（${REPEAT} 轮），结果写入 ${path.relative(ROOT, OUT).replace(/\\/g, '/')}`
+);
 console.log('下一句：python eval/score.py');

@@ -42,6 +42,9 @@ def load():
             r['expect'] = c['expect']
             r['title'] = c['title']
             r['url'] = c['url']
+            # 「这条主要靠哪一环拦下」—— 报告要能区分漏在抓取侧还是模型侧
+            r['guard'] = c.get('guard', '')
+            r['guardNote'] = c.get('guardNote', '')
 
     return dataset, results
 
@@ -285,6 +288,26 @@ def report(dataset, results, m):
     L.append('> 三类分开看的原因：它们回答的是不同的问题，合在一起算等于让「哪类用例多」决定总分。')
     L.append('')
 
+    if m['shouldRefuse']:
+        L.append('## 负样本：漏在哪一环')
+        L.append('')
+        L.append('同一条误纳，漏在**抓取侧**还是漏在**模型侧**，修法完全不同 ——')
+        L.append('所以每条负样本都标了「主要靠哪一环拦下」。')
+        L.append('')
+        L.append('| 用例 | 该谁拦 | 结果 | 这条为什么归这一环 |')
+        L.append('|---|---|---|---|')
+        for r in m['shouldRefuse']:
+            leaked = r['got'] and r['got']['ok'] is not False
+            mark = '⚠️ **误纳**' if leaked else '✅ 拦下'
+            L.append(
+                f"| `{r['id']}` | {r.get('guard') or '—'} | {mark} | {r.get('guardNote') or ''} |"
+            )
+        L.append('')
+        L.append('> **这一节只反映模型侧的拦截能力。** 评测是把正文直接喂给模型，')
+        L.append('> 抓取侧的判据（URL 特征 / 密码框 / 验证码框 / 正文过短且含登录话术）')
+        L.append('> 不在这条链路上 —— 它要在真实浏览器里单独验。')
+        L.append('')
+
     L.append('## 逐条明细')
     L.append('')
     L.append('| 用例 | 期望 | 得到 | 结果 | 字数 | 耗时 |')
@@ -371,6 +394,11 @@ def main():
           f"  95% CI {ci_text(len(m['hit']), len(m['digestible']))}")
     print(f"  误纳率       {pct(len(m['overAccepted']), len(m['shouldRefuse']))}  "
           f"({len(m['overAccepted'])}/{len(m['shouldRefuse'])})   不该消化的被消化了")
+    for r in m['shouldRefuse']:
+        leaked = r['got'] and r['got']['ok'] is not False
+        print(
+            f"      {'❌ 误纳' if leaked else '✅ 拦下'}  {(r.get('guard') or '—'):4s}  {r['id']}"
+        )
     print(f"  误拒率       {pct(len(m['refused']), len(m['shouldDigest']))}  "
           f"({len(m['refused'])}/{len(m['shouldDigest'])})   该消化的被判成不可消化")
     print(f"  调用失败率   {pct(len(m['callFailed']), m['total'])}  ({len(m['callFailed'])}/{m['total']})")
