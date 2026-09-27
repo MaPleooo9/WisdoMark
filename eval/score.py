@@ -10,9 +10,14 @@
 
 指标口径：
     分类一致率  与金标准一致的条数 / 应消化的条数（ok:false 的不计入分母）
+    误纳率      不该消化的却被消化了的比例 —— 用户会拿到一段凭空生成的摘要，比漏掉更糟
     误拒率      该 ok:true 却被判 ok:false 的比例 —— 这一项和准确率同等重要
     调用失败率  压根没跑出结构（网络 / 校验反复不过）的比例
     重试率      需要重试才通过的比例（反映 prompt 的稳定性）
+
+    ⚠️ 误纳率有多个口径（模型侧 / 模型是唯一防线 / 端到端），
+       报告里用的是**模型侧**（能从本仓库复算的那个），另两个当参考写在表下。
+       别把「排除掉抓取侧护栏兜底的条目」当成默认口径 —— 那正是挑有利分母。
 """
 
 import argparse
@@ -47,6 +52,19 @@ def load():
             r['guardNote'] = c.get('guardNote', '')
 
     return dataset, results
+
+
+def manifest_version():
+    """当前仓库里的扩展版本。
+
+    跑分产物里记着「跑分当时的版本」，这里读的是「现在仓库的版本」。
+    两者不一致时报告要主动说清楚差在哪 —— 不能让读者自己去发现对不上。
+    """
+    try:
+        with io.open(os.path.join(ROOT, 'manifest.json'), encoding='utf-8') as f:
+            return json.load(f).get('version', '')
+    except Exception:
+        return ''
 
 
 def wilson(hit, total, z=1.96):
@@ -116,6 +134,12 @@ def compute(results):
     # 被判成「可以消化」= 误纳。比漏掉更糟：用户会拿到一段凭空生成的摘要，而且看不出来。
     over_accepted = [r for r in should_refuse if r['got'] and r['got']['ok'] is not False]
 
+    # 「模型是唯一防线」的负样本：这些条目若模型失手，产品就真的漏了。
+    # 其余条目另有抓取侧护栏兜底（登录墙 / Cookie 墙），模型失手也不等于产品失手。
+    # 这个数字和「误纳率」互补 —— 后者衡量模型单独的能力，前者衡量产品的实际暴露面。
+    sole_guard = [r for r in should_refuse if (r.get('guard') or '') == '模型侧']
+    sole_guard_caught = [r for r in sole_guard if r['got'] and r['got']['ok'] is False]
+
     retried = [r for r in done if (r.get('attempts') or 0) > 1]
     times = [r['elapsedMs'] for r in done if r.get('elapsedMs')]
 
@@ -165,6 +189,12 @@ def compute(results):
             per_round.append((h, t))
 
     return {
+        # 摊平后的「一条用例一个代表结果」，逐条明细直接复用它。
+        # 不暴露出去的话，report() 只能去遍历原始 rows —— 那里只有 runs、没有 ok/got，
+        # 于是整张明细表会全部显示「调用失败」。这个 bug 真的发生过：
+        # 报告头部写着 95%，底部 27 行全 ❌，一份报告自己打自己的脸。
+        # 多数表决只能有一份实现，指标区和明细区必须读同一个列表才不会再次分叉。
+        'rows': rows,
         'total': len(rows),
         'callFailed': call_failed,
         'done': done,
@@ -172,6 +202,8 @@ def compute(results):
         'shouldRefuse': should_refuse,
         'refused': refused,
         'overAccepted': over_accepted,
+        'soleGuard': sole_guard,
+        'soleGuardCaught': sole_guard_caught,
         'digestible': digestible,
         'hit': hit,
         'miss': [r for r in digestible if r['got']['category'] != r['expect']['category']],
@@ -215,6 +247,19 @@ def report(dataset, results, m):
     L.append(f"| 总耗时 | {meta['elapsedSec']} 秒 |")
     L.append('')
 
+    # 跑分版本 vs 当前仓库版本。不一致时主动说清楚差在哪 ——
+    # 与其让读者自己发现「报告写 0.15.0、仓库是 0.16.0」然后怀疑整份报告，
+    # 不如先把差异和它的影响写出来。
+    cur_version = manifest_version()
+    if cur_version and cur_version != meta['extensionVersion']:
+        L.append(f"> 跑分时的扩展版本是 `{meta['extensionVersion']}`，当前仓库是 `{cur_version}`。")
+        L.append('> 两者的差异在**抓取侧**（`content-script.js` 的 `detectConsentWall` +')
+        L.append('> `service-worker.js` 中 `digestAndStore` 的早退），')
+        L.append('> **不在本报告评测的 `digestDocument` 链路上** —— 所以没有重跑模型：')
+        L.append('> 重跑一次要 16 分钟，而这次改动不会改变本报告里的任何一项指标，')
+        L.append('> 却会引入模型随机性、把一条「三轮零翻转」的干净基线搅浑。')
+        L.append('')
+
     L.append('## 指标')
     L.append('')
     L.append('| 指标 | 结果 | 95% Wilson 区间 | 说明 |')
@@ -237,6 +282,22 @@ def report(dataset, results, m):
     L.append(f"> 分类一致率的 95% Wilson 区间是 **{ci_text(len(m['hit']), len(m['digestible']))}** ——")
     L.append(f"> 用例只有 {m['total']} 条，区间偏宽，**分数只看趋势，不要当精确值**。")
     L.append('> 区间不是「不确定性」的免责声明，而是让读者知道这个数字能支撑多强的结论。')
+    L.append('')
+    L.append('> **误纳率这一个数有三个口径，别混用**（表内只放能从本仓库复算的）：')
+    L.append('>')
+    L.append(f"> - **模型侧 {len(m['overAccepted'])}/{len(m['shouldRefuse'])}**：本评测链路能测到的全部 ——")
+    L.append('>   负样本是**直接喂给模型**的，抓取侧根本不在这条链路上。这是唯一能从本仓库复算的口径，所以放在表里。')
+    L.append(f"> - **模型是唯一防线 {len(m['soleGuardCaught'])}/{len(m['soleGuard'])} 拦下**"
+             f"（{'、'.join('`' + r['id'] + '`' for r in m['soleGuard']) or '—'}）：")
+    L.append('>   只有这些条目，模型失手才等于产品失手；其余另有抓取侧护栏兜底。这才是真实的暴露面。')
+    L.append('> - **端到端 0/' + str(len(m['shouldRefuse'])) + '**：`neg-cookie` 在到达模型之前已被抓取侧拦下。')
+    L.append('>   但支撑它的是**仓库外**的端到端脚本（真实页面上 9/9），本报告无法自动产出 ——')
+    L.append('>   拿一个不可复算的数字当头条，等于用一句别人验不了的话自我背书，所以它只写在这里、不进指标表。')
+    L.append('>')
+    L.append('> 头条用的是**最差的那个口径**：把唯一失手的那条从分母里剔掉，正是「挑有利分母」，')
+    L.append('> 省下的几分好看远远抵不上失掉的可信度。')
+    L.append(f"> 另外提醒：负样本只有 {len(m['shouldRefuse'])} 条，**单条就是 "
+             f"{100.0 / len(m['shouldRefuse']):.1f} 个百分点** —— 这里的变化只应看趋势。")
     L.append('')
 
     if m['repeat'] > 1:
@@ -276,7 +337,7 @@ def report(dataset, results, m):
     descs = {
         'bookmark': '在实际内容上的表现',
         'probe': '在判据边界上的表现（专打模糊地带）',
-        'negative': '**该拦下的有没有被拦下**（登录页 / 验证码页 / 404 / 纯导航页）',
+        'negative': '**该拦下的有没有被拦下**（登录页 / 验证码页 / 404 / 纯导航页 / Cookie 与隐私声明页）',
     }
     for src in ('bookmark', 'probe', 'negative'):
         s = m['bySource'].get(src)
@@ -289,31 +350,62 @@ def report(dataset, results, m):
     L.append('')
 
     if m['shouldRefuse']:
-        L.append('## 负样本：漏在哪一环')
+        L.append('## 负样本：拦在哪一环')
         L.append('')
-        L.append('同一条误纳，漏在**抓取侧**还是漏在**模型侧**，修法完全不同 ——')
-        L.append('所以每条负样本都标了「主要靠哪一环拦下」。')
+        L.append('一条负样本有**两个互相独立的事实**：「产品里该由谁拦」和「这条评测链路里谁真的拦住了」。')
+        L.append('评测把正文**直接喂给模型**（`digestDocument`），抓取侧的护栏不在链路上 ——')
+        L.append('两者不一致时（`neg-login`、`neg-cookie`）恰恰是最该点名的，所以拆成两列。')
         L.append('')
-        L.append('| 用例 | 该谁拦 | 结果 | 这条为什么归这一环 |')
+        L.append('| 用例 | 设计上归谁拦 | 本链路（模型侧） | 为什么归这一环 |')
         L.append('|---|---|---|---|')
-        for r in m['shouldRefuse']:
+        guard_order = {'模型侧': 0, '两侧': 1, '抓取侧': 2}
+        for r in sorted(m['shouldRefuse'], key=lambda x: guard_order.get(x.get('guard') or '', 9)):
+            guard = r.get('guard') or '—'
             leaked = r['got'] and r['got']['ok'] is not False
-            mark = '⚠️ **误纳**' if leaked else '✅ 拦下'
-            L.append(
-                f"| `{r['id']}` | {r.get('guard') or '—'} | {mark} | {r.get('guardNote') or ''} |"
-            )
+            if guard == '模型侧':
+                # 唯一防线：模型失手 = 产品失手
+                mark = '⚠️ **误纳**（产品真漏）' if leaked else '✅ 拦下 · **唯一防线**'
+            elif guard == '两侧':
+                # 两侧都能拦：模型兜住了是分内之事，拦不住还有抓取侧
+                mark = '⚠️ 误纳 · 预期外（抓取侧本应兜住）' if leaked else '✅ 模型兜住了（本环由两侧共担）'
+            else:
+                # 抓取侧负责：模型这一环拦住算额外，拦不住是设计使然
+                mark = '⚠️ **误纳** · 预期内（已由抓取侧拦下）' if leaked else '✅ 模型也拦住了（额外，不在模型侧责任内）'
+            L.append(f"| `{r['id']}` | {guard} | {mark} | {r.get('guardNote') or ''} |")
+        L.append('')
+        L.append('> 读法：**「设计上归谁拦」是产品分工，「本链路」是评测实测，两者不是一回事。**')
+        L.append(f"> 只有标了「唯一防线」的 {len(m['soleGuard'])} 条，模型失手才等于产品失手 ——")
+        L.append(f"> 当前 {len(m['soleGuardCaught'])}/{len(m['soleGuard'])} 拦下。")
+        L.append('> 标「不计入模型侧责任」不是免罪，它说明这条本来就不该指望模型；')
+        L.append('> 标「额外拦住了」也不加分，换一篇文章它未必还兜得住。')
         L.append('')
         L.append('> **这一节只反映模型侧的拦截能力。** 评测是把正文直接喂给模型，')
-        L.append('> 抓取侧的判据（URL 特征 / 密码框 / 验证码框 / 正文过短且含登录话术）')
+        L.append('> 抓取侧的判据（URL 特征 / 密码框 / 验证码框 / 正文过短且含登录话术 / Cookie 与隐私话术）')
         L.append('> 不在这条链路上 —— 它要在真实浏览器里单独验。')
         L.append('')
+
+    L.append('## 评测覆盖不到的地方（这份报告能支撑什么结论）')
+    L.append('')
+    L.append('本报告测的是**消化链路**（`digestDocument`）。下面这些环节不在它的覆盖范围内 ——')
+    L.append('写出来是为了让「这个分数能支撑多强的结论」可判断，不是为了免责：')
+    L.append('')
+    L.append('| 环节 | 为什么覆盖不到 | 在别处怎么验 |')
+    L.append('|---|---|---|')
+    L.append('| 抓取侧护栏（登录墙 / Cookie 墙 / 过短正文） | 评测把正文直接喂给模型，不经过 content-script | 端到端脚本 `wm-consent-test.mjs`，真实页面上 9/9（脚本在仓库外）|')
+    L.append('| 图文帖 OCR（Tesseract） | 评测喂的是已拼好的正文快照，识别质量本身没有指标 | 人工抽查；本报告不含该项 |')
+    L.append('| 归档去重（URL 归一化） | `store.js` 的逻辑不在这条链路上 | 开发期独立验证脚本（仓库外）|')
+    L.append('| 抓取时序（等正文渲染稳定） | 评测用固定快照，生产依赖 `chrome.tabs` | 人工在真实页面上观察 |')
+    L.append('| 要点完整度 / 摘要幻觉 | 需要人工判断 | 计划中的人工评分表 |')
+    L.append('')
 
     L.append('## 逐条明细')
     L.append('')
     L.append('| 用例 | 期望 | 得到 | 结果 | 字数 | 耗时 |')
     L.append('|---|---|---|---|---|---|')
 
-    for r in (results.get('rows') or results.get('results') or []):
+    # 用 compute() 摊平后的行（多数表决结果）。**不要**去遍历原始 rows ——
+    # 那里只有 runs、没有 ok/got，整张表会全部显示「调用失败」。
+    for r in m['rows']:
         if not r.get('ok'):
             L.append(f"| `{r['id']}` | — | — | ❌ 调用失败 | — | — |")
             continue
@@ -327,7 +419,9 @@ def report(dataset, results, m):
             if got['ok'] is False:
                 verdict, cat = '✅ 正确拦下', '`ok:false`'
             else:
-                verdict, cat = '⚠️ **误纳**', got['category'] or '—'
+                # 护栏归属在抓取侧的条目，模型拦不住是设计使然（它根本不该被问到）
+                outside = '（已由抓取侧拦下，不在本链路）' if r.get('guard') == '抓取侧' else ''
+                verdict, cat = f'⚠️ **误纳**{outside}', got['category'] or '—'
         else:
             exp_label = r['expect']['category']
             if got['ok'] is False:
@@ -368,9 +462,10 @@ def report(dataset, results, m):
     L.append('')
     L.append('- **正文是快照**（`eval/dataset/texts/`）：抓取用的是生产的 content-script，')
     L.append('  但「等正文稳定」的策略是评测脚本自己实现的（生产那份依赖 `chrome.tabs`，跑在 service worker 里）。')
-    L.append('- 用例数偏少，分类一致率只应看趋势，不要当成精确值。')
+    L.append(f"- 用例数偏少（{m['total']} 条），分类一致率只应看趋势，不要当成精确值。")
     L.append('- 要点完整性（有没有漏内容）需要人工判断，本报告不含该项。')
-    L.append('- 单机单次跑分；模型有随机性（`temperature 0.2`），同一批跑两次结果可能不同。')
+    L.append(f"- **单机**：模型有随机性（`temperature 0.2`）。已跑 {m['repeat']} 轮取多数表决、")
+    L.append('  给出翻转条数与 Wilson 区间；但换机器或换模型版本都要重跑才算数。')
     L.append('')
 
     return '\n'.join(L)
