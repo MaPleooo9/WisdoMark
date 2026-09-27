@@ -89,7 +89,12 @@ async function runWithRetry({ prompt, messages, validate }) {
         elapsedMs: Date.now() - startedAt,
         valid: false,
         errors: [err.message],
-        raw: ''
+        raw: '',
+        // 网络错时没走到模型，token 一定是 0 —— 显式写 0（而不是 null），
+        // 这样 trace 里「这条 3 轮都 0 token」一眼就能认出是连不上，不是模型没输出
+        evalCount: 0,
+        promptEvalCount: 0,
+        modelMs: null
       });
 
       return { ok: false, error: err.message, attempts, networkError: true };
@@ -106,7 +111,12 @@ async function runWithRetry({ prompt, messages, validate }) {
       valid: outcome.ok,
       errors: outcome.errors || [],
       raw: reply.content,
-      evalCount: reply.evalCount
+      evalCount: reply.evalCount,
+      // 输入 token —— 它才是「这篇文章喂进去花了多少上下文」，
+      // 也解释了为什么长文更慢（输出 token 通常变化不大）
+      promptEvalCount: reply.promptEvalCount,
+      // 模型自报的耗时，和 elapsedMs（含网络与排队）分开记
+      modelMs: reply.totalMs
     });
 
     if (outcome.ok) return { ok: true, result: outcome, attempts };

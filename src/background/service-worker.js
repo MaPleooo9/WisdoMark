@@ -6,6 +6,7 @@
 //   llm.js     本地 Ollama 调用
 //   digest.js  消化流水线（校验 + 重试 + trace）
 //   page.js    标签页与抓正文
+//   trace.js   诊断日志（成功的 trace 挂归档记录，失败的进独立日志）
 //
 // 注意：service worker 不是常驻进程，浏览器会在空闲时回收它。
 // 任何需要跨事件存活的状态都必须落 chrome.storage，不要依赖模块级变量。
@@ -15,6 +16,7 @@ import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
 import { digestDocument, rankBatch, buildProfile, buildActionPlan } from './digest.js';
 import { saveDigest, countDigests, listDigests, getDigest, searchDigests, listStaleDigests } from './store.js';
 import { loadShared } from './shared.js';
+import { buildTrace, recordFailure, listFailures, clearFailures } from './trace.js';
 
 // ---------------------------------------------------------------------------
 // 侧栏行为
@@ -207,11 +209,44 @@ async function digestAndStore(extracted) {
     };
   }
 
+  const digestStart = Date.now();
+
   const result = await digestDocument({
     title: extracted.title,
     url: extracted.url,
     text: extracted.text
   });
+
+  // ---------------------------------------------------------------------------
+  // 消化失败时留一条诊断日志（阶段 4 的可观测性）
+  //
+  // 以前失败是「静默」的：结果直接返回给 UI，什么都不落盘。
+  // 于是用户看到一句「Ollama 返回 HTTP 403」之后，**再也查不到它发生过** ——
+  // 是这一次还是每次都这样？是这一篇还是所有篇？无从判断。
+  //
+  // 注意范围：只有「压根没拿到结果」（网络错 / 结构反复不过）才记。
+  // 模型判 ok:false（登录页 / 没正文主体）**不是失败，是护栏正常工作**，不记 ——
+  // 混进去会让失败日志被正常的护栏命中淹没，那个数字就没法看了。
+  // ---------------------------------------------------------------------------
+  if (!result.ok) {
+    await recordFailure({
+      url: extracted.url,
+      title: extracted.title,
+      origin: extracted.source || '',
+      error: result.error,
+      networkError: !!result.networkError,
+      ms: Date.now() - digestStart,
+      attempts: result.attempts,
+      extract: {
+        charCount: extracted.charCount,
+        lowContent: extracted.lowContent,
+        loginWall: extracted.loginWall || null,
+        consentWall: extracted.consentWall || null,
+        foregroundFallback: extracted.foregroundFallback,
+        minChars: extracted.minChars
+      }
+    });
+  }
 
   const payload = {
     ...result,
@@ -249,7 +284,7 @@ async function digestAndStore(extracted) {
   //
   // 归档失败不能让整次消化看起来失败：结果已经在手上，照样给用户，
   // 只在 UI 上说明这次没存上。所以这里自己吞异常，不往外抛。
-  payload.archive = await archiveResult(result, payload);
+  payload.archive = await archiveResult(result, payload, { ms: Date.now() - digestStart });
 
   // quiet = 批量消化。此时不写「最近一次结果」：
   // 跑完一批再重开侧栏，却只看到其中最后一条的单条结果，会让人以为整批只消化了一条。
@@ -261,7 +296,7 @@ async function digestAndStore(extracted) {
 }
 
 // 一次消化 → 一条归档记录。返回给 UI 的元信息：是不是新的、第几次、库里共几篇。
-async function archiveResult(result, payload) {
+async function archiveResult(result, payload, { ms = null } = {}) {
   // 模型判定「没有可消化正文」的不入档 —— 存进去只会污染后面的画像
   if (result?.value?.ok !== true) return null;
 
@@ -277,6 +312,14 @@ async function archiveResult(result, payload) {
       // 这一条是用哪版分类体系判的 —— 见 store.js 的 listStaleDigests
       promptVersion: result.meta?.promptVersion || '',
       attempts: Array.isArray(result.attempts) ? result.attempts.length : 0,
+      // 阶段 4：把「这次消化经历了什么」跟着记录一起存下来。
+      // 挂在这里而不是单独一张表 —— 归档详情本来就是「点开看这一条」的场景，
+      // trace 放在一起才能一眼对上。
+      trace: buildTrace({
+        attempts: result.attempts,
+        ms,
+        networkError: !!result.networkError
+      }),
       ocr: payload.ocr || null
     });
 
@@ -351,6 +394,17 @@ async function digestText({ text, title, url, source, ocr, quiet }) {
 
 // 批量消化时，侧栏对每一条先问一句「这条归档里有没有」——
 // 有就直接复用，不再重跑一次模型。这是「跑第二批几乎不用等」的前提。
+// 消化失败日志（阶段 4）。只回最近的 N 条，UI 直接渲染倒序列表。
+async function getFailures() {
+  const list = await listFailures();
+  return { ok: true, failures: list, total: list.length };
+}
+
+async function dropFailures() {
+  await clearFailures();
+  return { ok: true };
+}
+
 async function getArchiveByUrl({ url }) {
   try {
     const record = await getDigest(url);
@@ -665,7 +719,10 @@ const HANDLERS = {
   BUILD_PROFILE: buildProfileNow,
   GET_PROFILE: getProfile,
   BUILD_ACTIONS: buildActionsNow,
-  GET_ACTIONS: getActionPlan
+  GET_ACTIONS: getActionPlan,
+  // 阶段 4：诊断日志
+  GET_FAILURES: getFailures,
+  CLEAR_FAILURES: dropFailures
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

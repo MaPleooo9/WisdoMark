@@ -63,7 +63,12 @@ export async function pingOllama() {
 }
 
 // 非流式对话调用。modelCfg 来自 shared/prompt.json 的 model 段。
-// 返回 { content, evalCount, totalMs }
+// 返回 { content, evalCount, promptEvalCount, totalMs }
+//
+// evalCount / promptEvalCount 是 Ollama 给的**真实 token 数**（输出 / 输入），
+// 不是估的 —— 阶段 4 的 trace 要「token 估量」，有真实值就用真实值。
+// totalMs 是**模型侧**的耗时（Ollama 自报），和调用方的墙上时间分开记：
+// 两者差得多，说明时间花在了网络或排队上，而不是模型算得慢。
 export async function chat(messages, modelCfg, { timeoutMs = 120000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -105,6 +110,7 @@ export async function chat(messages, modelCfg, { timeoutMs = 120000 } = {}) {
     return {
       content,
       evalCount: data.eval_count ?? null,
+      promptEvalCount: data.prompt_eval_count ?? null,
       totalMs: data.total_duration ? Math.round(data.total_duration / 1e6) : null
     };
   } finally {

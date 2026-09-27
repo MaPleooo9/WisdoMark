@@ -325,6 +325,10 @@ export async function saveDigest(record = {}) {
     // 不需要额外维护任何状态；也因此中断后重来不会重复处理。
     promptVersion: record.promptVersion || '',
     attempts: record.attempts || 0,
+    // 阶段 4 的 trace：这次消化花多久、调了几次模型、耗了多少 token。
+    // 不存模型原始输出（几 KB），只存每轮的耗时 / 校验结果 / 错误 / token —— 见 trace.js。
+    // 老记录没有这个字段（读到的是 undefined），UI 要能容错。
+    trace: record.trace || null,
     ocr: record.ocr || null,
     // 首次消化的时间不动 —— 「这篇是什么时候进来的」和「上次重读是什么时候」
     // 是两个问题，画像和清单都更关心前者
