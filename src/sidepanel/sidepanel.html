@@ -128,6 +128,19 @@
           <ul class="row-list" id="archive-list"></ul>
           <button class="btn btn-ghost is-hidden" id="btn-archive-more" type="button">继续往下看</button>
           <p class="hint" id="archive-hint">消化过的内容都存在本地库里，这里可以按关键词和分类翻出来。</p>
+
+          <!-- 诊断：最近失败的消化。
+               只记录「压根没拿到结果」的（连不上模型 / 连续几次输出结构不合要求）——
+               模型判定「这一页没有正文主体」不算失败，那是护栏正常工作。
+               有记录时才出现，平时不占位置。 -->
+          <details class="diag is-hidden" id="failures-box">
+            <summary class="diag-summary">
+              <span class="diag-title" id="failures-title">—</span>
+            </summary>
+            <ul class="row-list" id="failures-list"></ul>
+            <p class="hint" id="failures-note">—</p>
+            <button class="link-btn" id="btn-clear-failures" type="button">清空记录</button>
+          </details>
         </div>
 
         <p class="hint run-status is-hidden" id="run-status"></p>

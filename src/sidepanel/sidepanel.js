@@ -52,6 +52,11 @@ const els = {
   archiveList: document.getElementById('archive-list'),
   archiveHint: document.getElementById('archive-hint'),
   btnArchiveMore: document.getElementById('btn-archive-more'),
+  failuresBox: document.getElementById('failures-box'),
+  failuresTitle: document.getElementById('failures-title'),
+  failuresList: document.getElementById('failures-list'),
+  failuresNote: document.getElementById('failures-note'),
+  btnClearFailures: document.getElementById('btn-clear-failures'),
   reclassifyBox: document.getElementById('reclassify-box'),
   reclassifyHint: document.getElementById('reclassify-hint'),
   btnReclassify: document.getElementById('btn-reclassify'),
@@ -207,6 +212,8 @@ function switchPane(name) {
     searchArchive();
     // 顺便看一眼有没有「旧分类体系下判的」记录 —— 有才会显示那一行
     refreshStaleState();
+    // 以及最近有没有消化失败过（阶段 4 的诊断区）
+    loadFailures();
   }
 }
 
@@ -948,6 +955,103 @@ function renderArchiveStat(resp) {
   }
 }
 
+// 一条 trace 压成一行：这条消化花了多久、调了几次模型、进出各多少 token。
+//
+// 为什么要给用户看这个：模型的耗时和 token 数以前是黑盒 ——
+// 用户只知道「等了 12 秒」，不知道这 12 秒花在哪、为什么这篇比那篇慢。
+// 有了这一行，「长文更慢」能看见是因为**输入 token 大**，不是因为模型啰嗦。
+function buildTraceLine(trace) {
+  if (!trace) return null;
+
+  const bits = [];
+  if (trace.ms != null) bits.push(`用时 ${(trace.ms / 1000).toFixed(1)} 秒`);
+  if (trace.calls) bits.push(trace.calls > 1 ? `模型调用 ${trace.calls} 次（重试过）` : '模型调用 1 次');
+
+  if (trace.promptEvalCount != null || trace.evalCount != null) {
+    const inTok = trace.promptEvalCount != null ? trace.promptEvalCount.toLocaleString('en-US') : '—';
+    const outTok = trace.evalCount != null ? trace.evalCount.toLocaleString('en-US') : '—';
+    bits.push(`输入 ${inTok} / 输出 ${outTok} token`);
+  }
+
+  // 模型自报的耗时明显短于端到端，说明时间有一部分花在排队或网络上，而不是模型算得慢
+  if (trace.modelMs != null && trace.ms != null && trace.ms - trace.modelMs > 1500) {
+    bits.push(`其中模型侧 ${(trace.modelMs / 1000).toFixed(1)} 秒`);
+  }
+
+  if (!bits.length) return null;
+  return el('p', 'trace-line', bits.join(' · '));
+}
+
+// ---------------------------------------------------------------------------
+// 消化失败的诊断（阶段 4）
+//
+// 以前失败是静默的：报一句错就完了，用户再也查不到它发生过 ——
+// 是这一次还是每次都这样？是这一篇还是所有篇？无从判断。
+// ---------------------------------------------------------------------------
+
+// 清空失败记录。确认一次 —— 清掉就再也看不到「前几次为什么失败」了
+async function handleClearFailures() {
+  if (!window.confirm('清空这些失败记录？清掉之后就查不到它们发生过。')) return;
+
+  try {
+    await send('CLEAR_FAILURES');
+  } catch {
+    // 清不掉就算了，下次切进归档还会再拉一次
+  }
+
+  await loadFailures();
+}
+
+async function loadFailures() {
+  let resp;
+  try {
+    resp = await send('GET_FAILURES');
+  } catch {
+    return; // 诊断区读失败不值得打扰用户
+  }
+
+  const list = resp?.failures || [];
+
+  // 先清空列表，再决定隐藏 —— 顺序反了的话「清空记录」之后
+  // 容器隐藏了、条目却还留在 DOM 里（实测断言抓到的就是这个）
+  els.failuresList.innerHTML = '';
+  setHidden(els.failuresBox, list.length === 0);
+  if (!list.length) return;
+
+  els.failuresTitle.textContent = `最近有 ${list.length} 次消化没拿到结果`;
+
+  for (const f of list.slice(0, 8)) els.failuresList.append(buildFailureItem(f));
+
+  els.failuresNote.textContent = list.length > 8
+    ? `只显示最近 8 条，共 ${list.length} 条。`
+    : '这些是「压根没拿到结果」的（连不上模型 / 连续几次输出结构不合要求）。模型判定某一页没有正文主体不算失败 —— 那是护栏在正常工作。';
+}
+
+function buildFailureItem(f) {
+  const li = el('li', 'fail-item');
+
+  const head = el('div', 'fail-head');
+  head.append(el('span', 'fail-title', f.title || '(无标题)'));
+  head.append(el('span', 'fail-when', formatWhen(f.at)));
+  li.append(head);
+
+  li.append(el('div', 'fail-error', f.error || '未知原因'));
+
+  // 抓取侧诊断：把「没抓到正文」和「模型不行」分开。
+  // 少了这一行，用户看到「Ollama 返回 HTTP 403」根本不知道该去改哪里。
+  const diag = [];
+  if (f.origin) diag.push(`来源：${f.origin}`);
+  if (f.extract?.charCount != null) diag.push(`抓到 ${f.extract.charCount} 字`);
+  if (f.extract?.loginWall) diag.push('命中登录墙');
+  if (f.extract?.consentWall) diag.push('命中 Cookie 声明页');
+  if (f.extract?.lowContent) diag.push('正文过短');
+  if (f.calls) diag.push(`模型调用 ${f.calls} 次`);
+  if (f.ms != null) diag.push(`${(f.ms / 1000).toFixed(1)} 秒`);
+  if (diag.length) li.append(el('div', 'fail-diag', diag.join(' · ')));
+
+  return li;
+}
+
 function buildArchiveItem(row) {
   const li = el('li', 'archive-item');
   const details = document.createElement('details');
@@ -991,6 +1095,11 @@ function buildArchiveItem(row) {
   redigestBtn.title = '按当前的分类体系重跑这一篇';
   redigestBtn.addEventListener('click', () => redigestOne(row, redigestBtn));
   actions.append(redigestBtn);
+
+  // 这一条是怎么来的（阶段 4 的 trace）。老记录没有这个字段，不显示 ——
+  // 与其写一行「没有 trace」占用户的位置，不如安静地不给。
+  const traceLine = buildTraceLine(row.trace);
+  if (traceLine) body.append(traceLine);
 
   body.append(actions);
 
@@ -1821,6 +1930,7 @@ async function init() {
   els.archiveKeyword.addEventListener('input', searchArchiveDebounced);
   els.archiveCategory.addEventListener('change', () => searchArchive());
   els.btnArchiveMore.addEventListener('click', () => searchArchive({ more: true }));
+  els.btnClearFailures.addEventListener('click', handleClearFailures);
   els.btnReclassify.addEventListener('click', handleReclassify);
   els.btnRefreshFolders.addEventListener('click', handleRefreshFolders);
   els.batchFolder.addEventListener('change', () => {

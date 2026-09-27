@@ -639,6 +639,83 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* ---------------------------------------------------------------------------
+   诊断区：最近失败的消化（阶段 4）
+   平时隐藏，只有真的失败过才出现 —— 没坏就不要占用户的位置。
+   --------------------------------------------------------------------------- */
+.diag {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.diag-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-faint);
+  cursor: pointer;
+  list-style: none;
+}
+
+.diag-summary::-webkit-details-marker {
+  display: none;
+}
+
+.diag-title {
+  font-weight: 500;
+  color: var(--fail);
+}
+
+.fail-item {
+  list-style: none;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.06));
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.fail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+}
+
+.fail-title {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fail-when {
+  color: var(--text-faint);
+  flex: none;
+}
+
+.fail-error {
+  margin-top: 2px;
+  color: var(--fail);
+  word-break: break-word;
+}
+
+.fail-diag {
+  margin-top: 2px;
+  color: var(--text-faint);
+  word-break: break-word;
+}
+
+/* trace 行：挂在归档详情里，说明这一条是怎么来的 */
+.trace-line {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  word-break: break-word;
+}
+
 .archive-item:first-child {
   border-top: none;
 }

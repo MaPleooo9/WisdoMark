@@ -450,7 +450,11 @@ async function searchArchive({ keyword = '', category = '', limit = 30, before =
         digestedAt: r.digestedAt,
         firstDigestedAt: r.firstDigestedAt,
         digestCount: r.digestCount || 1,
-        promptVersion: r.promptVersion || ''
+        promptVersion: r.promptVersion || '',
+        // ⚠️ 这里是**白名单投影**：往归档记录里加字段时，必须同步加到这里，
+        // 否则 UI 拿不到。实测踩过 —— trace 落库了、测试也是绿的，
+        // 但界面上一条都不显示，因为就是在这一层被丢掉的。
+        trace: r.trace || null
       }))
     };
   } catch (err) {
