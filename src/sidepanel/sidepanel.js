@@ -57,6 +57,7 @@ const els = {
   failuresList: document.getElementById('failures-list'),
   failuresNote: document.getElementById('failures-note'),
   btnClearFailures: document.getElementById('btn-clear-failures'),
+  stageBadge: document.getElementById('stage-badge'),
   reclassifyBox: document.getElementById('reclassify-box'),
   reclassifyHint: document.getElementById('reclassify-hint'),
   btnReclassify: document.getElementById('btn-reclassify'),
@@ -1892,6 +1893,10 @@ async function restoreLastDigest(open) {
 }
 
 async function init() {
+  // 页脚显示扩展版本（原先这里写死「阶段 N」，阶段一推进就过期了）。
+  // 用处是实际的：改了代码要重新加载扩展，版本号变了才能确认加载的是新版。
+  els.stageBadge.textContent = `v${chrome.runtime.getManifest().version}`;
+
   // 先渲染上次的探活结果，避免侧栏重开时一片空白
   const {
     ollamaStatus,

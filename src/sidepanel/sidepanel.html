@@ -198,7 +198,10 @@
 
     <footer class="footer">
       <span>Wisey · 本地运行，零云端</span>
-      <span class="badge" id="stage-badge">阶段 2</span>
+      <!-- 这里原先写死「阶段 2」—— 阶段推进时没人会记得改它，于是它一直是错的。
+           改成显示版本号（由 JS 从 manifest 读）：重新加载扩展后能一眼确认
+           加载的是哪个版本，这对「改了东西要重新加载」这个流程有实际用处。 -->
+      <span class="badge" id="stage-badge">—</span>
     </footer>
 
     <script type="module" src="sidepanel.js"></script>
