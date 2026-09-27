@@ -1,0 +1,40 @@
+MIT License
+
+Copyright (c) 2026 MaPleooo9
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## 第三方组件
+
+本项目**随仓库打包**了以下第三方组件（为了兑现「全本地、零云端」——
+OCR 引擎不能运行时去连 CDN 下载）：
+
+| 组件 | 位置 | 许可 |
+|---|---|---|
+| [tesseract.js](https://github.com/naptha/tesseract.js) v7.0.0（浏览器构建） | `vendor/tesseract/` | Apache-2.0 |
+| [tesseract.js-core](https://github.com/naptha/tesseract.js) v7.0.0（WASM 核心，SINGLE_FILE 构建） | `vendor/tesseract/core/` | Apache-2.0 |
+| [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) 简体中文语言包 | `vendor/tesseract/lang/` | Apache-2.0 |
+
+以上组件均**原样拷贝、未做修改**，各自保留原许可；Apache-2.0 与本项目的 MIT 兼容。
+各组件的具体出处与版本见 [`vendor/tesseract/README.md`](vendor/tesseract/README.md)。
+
+运行期依赖（不随仓库分发）：[Ollama](https://github.com/ollama/ollama)（MIT）
+与本机拉取的模型权重（`qwen3:8b` 等，各自的模型许可）。
