@@ -67,6 +67,21 @@ def manifest_version():
         return ''
 
 
+def prompt_version():
+    """当前仓库里的 prompt 版本。
+
+    这是判断「一份老报告还算不算数」的**真正判据** ——
+    模型收到的输入（`prompt.json`）和判定标准（`output-schema.json`）都在 `shared/` 里，
+    这两个文件没动过，指标就不会变。`src/` 下改了多少都不必然影响它
+    （抓取侧护栏、trace 记录都不改变喂给模型的内容）。
+    """
+    try:
+        with io.open(os.path.join(ROOT, 'shared', 'prompt.json'), encoding='utf-8') as f:
+            return json.load(f).get('version', '')
+    except Exception:
+        return ''
+
+
 def wilson(hit, total, z=1.96):
     """二项比例的 Wilson 置信区间。
 
@@ -247,17 +262,37 @@ def report(dataset, results, m):
     L.append(f"| 总耗时 | {meta['elapsedSec']} 秒 |")
     L.append('')
 
-    # 跑分版本 vs 当前仓库版本。不一致时主动说清楚差在哪 ——
-    # 与其让读者自己发现「报告写 0.15.0、仓库是 0.16.0」然后怀疑整份报告，
-    # 不如先把差异和它的影响写出来。
+    # 跑分版本 vs 当前仓库 —— **让报告自己诊断**它还算不算数。
+    #
+    # 演进过程值得记一笔：第一版写的是「差异在抓取侧（detectConsentWall + digestAndStore 早退）」
+    # —— 版本号是动态读的不会烂，但那段分析是写死的，多加一个版本就变成假话。
+    # 第二版换成「跑 git log 看源码树有没有改」，也不行：trace 那次提交确实动了
+    # digest.js，命令有输出，可它改的只是记录字段、不改变喂给模型的内容，
+    # 于是**判据和结论对不上**。
+    #
+    # 现在落在 prompt 版本号上：模型收到的输入与判定标准都只在 shared/ 里，
+    # 那两个文件的版本号没变，指标就不可能变。判据本身可自动核对，不用人来解释。
     cur_version = manifest_version()
+    cur_prompt = prompt_version()
     if cur_version and cur_version != meta['extensionVersion']:
-        L.append(f"> 跑分时的扩展版本是 `{meta['extensionVersion']}`，当前仓库是 `{cur_version}`。")
-        L.append('> 两者的差异在**抓取侧**（`content-script.js` 的 `detectConsentWall` +')
-        L.append('> `service-worker.js` 中 `digestAndStore` 的早退），')
-        L.append('> **不在本报告评测的 `digestDocument` 链路上** —— 所以没有重跑模型：')
-        L.append('> 重跑一次要 16 分钟，而这次改动不会改变本报告里的任何一项指标，')
-        L.append('> 却会引入模型随机性、把一条「三轮零翻转」的干净基线搅浑。')
+        same_prompt = bool(cur_prompt) and cur_prompt == meta['promptVersion']
+        L.append(f"> **跑分版本 vs 当前仓库**：这份报告的数字跑于扩展 `{meta['extensionVersion']}` / "
+                 f"prompt `{meta['promptVersion']}`，"
+                 f"当前仓库是 `{cur_version}` / prompt `{cur_prompt or '—'}`。")
+        L.append('>')
+        if same_prompt:
+            L.append('> **prompt 版本一致，所以这份数字仍然有效。** 判据就这一条：')
+            L.append('> 模型收到的输入与判定标准都在 `shared/prompt.json`（prompt 正文与参数）')
+            L.append('> 和 `shared/output-schema.json`（校验规则）里 —— 它们没动过，指标就不会变。')
+            L.append('>')
+            L.append('> `src/` 下的改动不必然影响指标：抓取侧护栏、trace 记录都不改变喂给模型的内容。')
+            L.append('> 所以判据落在这两个文件的版本号上，**而不是「源码树里有没有新提交」**。')
+            L.append('>')
+            L.append('> 因此没有重跑模型 —— 重跑一次约 16 分钟，不会改变这里任何一项指标，')
+            L.append('> 却会引入模型随机性、把一条「三轮零翻转」的干净基线搅浑。')
+        else:
+            L.append('> ⚠️ **prompt 版本对不上（或读不到）—— 这份数字已经过期，不要引用。**')
+            L.append('> 重新跑：`node eval/run.mjs`（约 16 分钟）→ `python eval/score.py`。')
         L.append('')
 
     L.append('## 指标')
