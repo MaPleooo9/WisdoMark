@@ -88,6 +88,62 @@ _NUM_RE = re.compile(
     r'MB/s|KB/s|K|M|G|k|m|s)'
 )
 
+# 不带单位的**小数**（82.3 / 0.6 / 2.14）。
+#
+# 为什么单列一个：`_NUM_RE` 要求数字后面跟单位，所以「MMLU 跑分 82.3」
+# 「占用 97.5%」里的 82.3 这类**一个都不进统计**。实测（2026-09-30）：
+# 输出侧 36 个数字里有 11 个是这种裸小数（占 31%），而且漏掉的恰好是
+# 跑分、比例这类**最要紧**的数字 —— 编错了也没人看得见。
+#
+# 只收小数、不收裸整数：裸整数里混着日期、编号、页码，噪声太大；
+# 而带小数点的数字在正文里几乎总是有实义的量。
+_DEC_RE = re.compile(r'\d+\.\d+')
+
+
+def _bounded(text, core):
+    """`core` 在 text 里是否作为**独立数字**出现（不是更长数字的一部分）。
+
+    为什么不能用 `in`：`'0.5' in '10.5'` 是 True —— 子串包含会让
+    「原文只有 10.5」把「输出了 0.5」判成有依据。数字前后不能再接数字或小数点。
+    """
+    return bool(re.search(r'(?<![\d.])' + re.escape(core) + r'(?![\d])', text))
+
+
+def extract_numbers(text, with_decimals=False, keep_chrome=False):
+    """数字锚 → {数位核心: 完整写法}
+
+    with_decimals：是否把不带单位的小数也算进来。
+      - **幻觉侧用 True** —— 编出来的数字不管有没有单位都是编。
+      - **覆盖侧用 False**（默认）—— 分母要保守，版本号 `2.2` 这类
+        不该算「必须带出来的信息」。方向不同，口径就该不同。
+
+    keep_chrome：是否保留页面装饰。
+      - **幻觉侧用 True** —— 问的是「原文里有没有这个数字」，
+        模型写了发布日期/评论数不算编造，只是没被要求写。
+      - **覆盖侧用 False**（默认）—— 本来就该只拿正文区域当标尺。
+
+    ⚠️ 这两个开关是 2026-09-30 补的。在此之前 `any_nums` 的注释写着
+    「用完整原文」，但函数内部**无条件**先 `strip_chrome` —— 于是它和
+    `in_nums` 是同一份数据，注释在说谎，而且没人看得出来。
+    """
+    src = norm(text if keep_chrome else strip_chrome(text))
+
+    out = {}
+    for m in _NUM_RE.finditer(src):
+        raw = m.group(0)
+        core = re.sub(r'[^\d.]', '', raw)
+        core = core.strip('.')
+        if core and len(core) <= 12:
+            out.setdefault(core, raw.strip())
+
+    if with_decimals:
+        for m in _DEC_RE.finditer(src):
+            core = m.group(0)
+            if len(core) <= 12:
+                out.setdefault(core, core)
+
+    return out
+
 # 拉丁词。中文文章里的拉丁词基本都是产品名 / 命令 / 术语，是很干净的专名信号。
 _LATIN_RE = re.compile(r'[A-Za-z][A-Za-z0-9_.+\-]*')
 
@@ -155,8 +211,13 @@ _CN_NUM = {
 
 
 def _num_covered(core, out_tight):
-    """数字是否被覆盖：阿拉伯写法或中文写法任一命中都算。"""
-    if tight(core) in out_tight:
+    """数字是否被覆盖：阿拉伯写法或中文写法任一命中都算。
+
+    用 `_bounded` 而不是 `in` —— 否则「原文有 125」会把「输出了 25」判成覆盖。
+    这是**方向性**的差别：子串包含会让召回率虚高，而虚高的召回率正是
+    最容易被当成「模型做得不错」的那类假证据。
+    """
+    if _bounded(out_tight, tight(core)):
         return True
     return any(cn in out_tight for cn in _CN_NUM.get(core, ()))
 
@@ -233,18 +294,6 @@ def strip_chrome(text):
     return t
 
 
-def extract_numbers(text):
-    """数字锚 → {数位核心: 完整写法}"""
-    out = {}
-    for m in _NUM_RE.finditer(norm(strip_chrome(text))):
-        raw = m.group(0)
-        core = re.sub(r'[^\d.]', '', raw)
-        core = core.strip('.')
-        if core and len(core) <= 12:
-            out.setdefault(core, raw.strip())
-    return out
-
-
 def extract_latin(text):
     """拉丁专名锚 → 原样写法（首见）"""
     out = {}
@@ -313,6 +362,84 @@ def extract_count_claims(text):
     return out
 
 
+# ---------------------------------------------------------------------------
+# 要点溯源 —— 一个给人工复核用的「排序器」，不是评分
+# ---------------------------------------------------------------------------
+#
+# 背景：这里本来想解决的是「语义层面的忠实度」—— 意思讲反、张冠李戴。
+# 试过了、也失败了，过程记在下面，**别再重复走一遍**：
+#
+#   方案 A：先给要点锁定一句原文，再查「要点里的数字在不在那句里」。
+#     ✗ 模型常常**跨句归纳**，锁定单句必然锁错，于是把正确归纳判成张冠李戴。
+#   方案 B：遍历该数字在原文的**每次**出现，取上下文最像的那一次。
+#     ✗ 改写会同时破坏上下文相似度：实测「2 元 / 50 倍」这类**正确**的
+#       条目相似度只有 0.29，而阈值根本没法划。
+#   方案 C：查「数字+单位」在原文里有没有同样的紧邻组合（高精度假设）。
+#     ✗ 实测 37 个（要点×数字）里命中 4 条：2 条是我自己的搜索 bug
+#       （原文写中文数字「十五分钟」、小数点被清洗掉），
+#       1 条真命中但**已被数字幻觉检查覆盖**，
+#       1 条是误报 —— 原文写「也是**十分之一**」，模型写「差 10 倍」，**意思完全对**。
+#
+# **结论：在当前条件下，机械地判定「数字挂错了对象」不可靠。**
+# 产出不是指标，而是一个**对照表**：把每条要点和它在原文里最像的那句话并排摆出来，
+# 人扫一眼就能判断 —— 把复核成本从「读完整篇」降到「看一列对照」。
+#
+# ⚠️ 因此这个相似度**不是质量分**：归纳、改写都会让分数变低，
+# 低分只代表「需要人看一眼」，不代表写错了。它唯一的用途是**排序**。
+# ---------------------------------------------------------------------------
+
+def _clean_for_match(s):
+    """只留汉字 / 字母 / 数字 / 小数点 —— 标点与空白会干扰 n-gram 匹配。"""
+    return re.sub(r'[^\u4e00-\u9fffA-Za-z0-9.]', '', str(s or ''))
+
+
+def _shingles(s, n=2):
+    c = _clean_for_match(s)
+    if len(c) < n:
+        return {c} if c else set()
+    return {c[i:i + n] for i in range(len(c) - n + 1)}
+
+
+def _overlap(a, b):
+    """重叠系数 |A∩B| / min(|A|,|B|)。
+
+    不用 Dice / Jaccard：要点通常比原文句子短，Dice 会被长句拖死 ——
+    实测同一批数据上，明显对得上的条目会被压到 0.3 以下，噪声盖过信号。
+    重叠系数只问「短的那边有多少被覆盖」，对长度差不敏感。
+    """
+    if not a or not b:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
+
+
+def split_source_sentences(text):
+    """把正文区域切成句子 —— 溯源的最小单位。"""
+    sents = []
+    for para in re.split(r'\n+', strip_chrome(str(text or ''))):
+        for s in re.split(r'(?<=[。！？；!?;])', para):
+            s = s.strip()
+            if len(_clean_for_match(s)) >= 8:
+                sents.append(s)
+    return sents
+
+
+def traceability(points, sents):
+    """给每条要点找它在原文里最像的那句话 → [(相似度, 原句)]"""
+    if not sents:
+        return [(0.0, '')] * len(points)
+    bag = [_shingles(s) for s in sents]
+    out = []
+    for p in points:
+        ps = _shingles(p)
+        best, bi = 0.0, -1
+        for i, ss in enumerate(bag):
+            v = _overlap(ps, ss)
+            if v > best:
+                best, bi = v, i
+        out.append((round(best, 3), sents[bi] if bi >= 0 else ''))
+    return out
+
+
 def has_anchor(point):
     """这条要点里有没有「具体的东西」：数字、拉丁词、或引号里的术语。"""
     if _NUM_RE.search(norm(point)):
@@ -328,18 +455,19 @@ def check_case(text, got, shape):
     out_tight = tight(out_text)
     out_tight_low = out_tight.lower()
 
-    # 两套锚点集合，用途不同：
-    #   recall 侧用「去掉页面装饰」的版本 —— 问的是「该带出来的信息带了吗」
-    #   hallucination 侧用「完整原文」的版本 —— 问的是「这个数字原文里有吗」。
-    #     装饰也算「原文里有」：模型写了发布日期不算编造，只是没被要求写。
-    in_nums = extract_numbers(strip_chrome(text))
+    # 两侧的**口径刻意不同**（2026-09-30 分开）：
+    #
+    #   覆盖侧（分母）：正文区域 + 只算带单位的数字 —— 保守。
+    #     分母里混进版本号、装饰数字，指标会安静地指向错误的结论。
+    #   幻觉侧（分子）：完整原文 + 连裸小数一起算 —— 宁可严。
+    #     编出来的数字不管有没有单位都是编，漏查一个就等于放过一条假信息。
+    in_nums = extract_numbers(text)
     in_latin = extract_latin(strip_chrome(text))
-    any_nums = extract_numbers(text)
+    any_nums = extract_numbers(text, with_decimals=True, keep_chrome=True)
     cn_values = extract_cn_values(text)
 
     # —— 承诺 1：不得编造正文里没有的数字 ——
-    # 用**未过滤**的完整原文判「原文有没有」，并且认中文数字写法。
-    out_nums = extract_numbers(out_text)
+    out_nums = extract_numbers(out_text, with_decimals=True, keep_chrome=True)
     invented = {
         c: raw for c, raw in out_nums.items() if not _num_supported(c, any_nums, cn_values)
     }
@@ -363,6 +491,9 @@ def check_case(text, got, shape):
     # —— 承诺 4：要点是否落到具体细节 ——
     points = got.get('points') or []
     vague = [p for p in points if not has_anchor(p)]
+
+    # —— 要点溯源：每条要点 + 原文里最像的那句话 ——
+    traces = traceability(points, split_source_sentences(text))
 
     # —— 承诺 6/7：条目数与形态的关系 ——
     n_items = count_items(text)
@@ -389,6 +520,7 @@ def check_case(text, got, shape):
         'nItems': n_items,
         'countClaims': claims_anywhere,
         'countInSummary': claims_in_summary,
+        'traces': traces,
         'shape': shape,
         'summary': got.get('summary', ''),
         'summaryChars': len(got.get('summary', '')),
@@ -500,6 +632,17 @@ def report(rows, meta):
              f"锚点 {num_total + lat_total} 个（数字 {num_total} · 专名 {lat_total}），"
              f"输出侧数字 {out_num_total} 个。")
     L.append('')
+    L.append('> ⚠️ **两侧的分母口径刻意不同，别拿它们相除：**')
+    L.append('>')
+    L.append(f"> - **召回率的分母（原文锚点 {num_total} 个）**：正文区域 + "
+             f"**只算带单位的数字** —— 保守，版本号 `2.2` 这类不该算「必须带出来的信息」。")
+    L.append(f"> - **幻觉率的分母（输出侧 {out_num_total} 个）**：连**不带单位的小数**一起算 —— "
+             f"宁严，编出来的数字不管有没有单位都是编。")
+    L.append('>')
+    L.append('> 这个不对称是 2026-09-30 补的。在此之前两侧都只认带单位的数字，'
+             '于是「跑分 82.3 / 79.6 / 91.4」这类**最要紧**的数字'
+             '（实测占输出侧 31%）在两边都是隐形的 —— 编错了没人看得见。')
+    L.append('')
     L.append('> ⚠️ **数字召回率是一个偏保守的下限值，别读成「只有一半信息被装进去」。**')
     L.append('> 它低估的原因是结构性的：模型把 N 条内容都写出来了但没写「N 个」、')
     L.append('> 把「1.2 万」写成「12000」这类改写，都会记成「没覆盖」。')
@@ -507,11 +650,12 @@ def report(rows, meta):
     L.append('> 而不是一个可以对外宣称的绝对分数。')
     L.append('')
 
-    L.append('### 五个必须说清的盲区')
+    L.append('### 六个必须说清的盲区')
     L.append('')
-    L.append('1. **数字召回率高 ≠ 写得好。** 它是**下限**检查：低了一定漏了内容；')
-    L.append('   高只说明「数字抄进去了」，不说明讲对了 —— 把意思说反、把 A 的结论安到 B 头上，')
-    L.append('   锚点照样全部命中。**语义层面的忠实度本报告不负责。**')
+    L.append('1. **锚点指标查的是「词有没有抄进去」，不是「讲对没讲对」。**')
+    L.append('   把意思说反、把 A 的结论安到 B 头上，锚点照样全部命中 —— 这是本报告最大的盲区。')
+    L.append('   2026-09-30 试过把它机械化，**三套方案全部失败**（过程见下面「要点溯源」一节）。')
+    L.append('   现在能给的**不是指标，是一张对照表**：让人扫一眼就能判，机器只负责排序。')
     L.append('2. **只看阿拉伯数字。** 中文数字（「七个阶段」的「七」）不在统计内，')
     L.append('   所以分母偏小、召回率会**偏高**一点。')
     L.append('3. **专名覆盖系统性偏低，只能当参考。** 模型把 `Microsoft` 写成「微软」、')
@@ -531,6 +675,79 @@ def report(rows, meta):
     L.append('> （实测：不过滤时 31.4%，且「原文没有可漏数字」的用例会被算成 0 分）。')
     L.append('> 幻觉判据用的是**未过滤**的完整原文：模型写了发布日期不算编造。')
     L.append('')
+    L.append('6. **边界判定只修了数字，专名仍用子串包含。** 「`AI`」会匹配到「`AIGC`」里 ——')
+    L.append('   方向是**高估覆盖**。数字侧 2026-09-30 已修（用前后不接数字的边界匹配），')
+    L.append('   修的那一刻实测**虚高了 6.4 个百分点**：`5年` 命中在 `25项` 里、')
+    L.append('   `10个` 命中在 `1020个版式` 里、`20个` 命中在 `200倍` 里 ——')
+    L.append('   全是把长数字的一部分当成了锚点。**虚高的召回率是最容易被当成'
+             '「模型做得不错」的假证据**，所以宁可修到偏低。专名侧还没修。')
+    L.append('')
+
+    # —— 要点溯源 ——
+    pairs = []
+    for r in rows:
+        for p, (score, sent) in zip(
+            (r['got'].get('points') or []), r['_q']['traces']
+        ):
+            pairs.append((score, r['id'], p, sent))
+
+    if pairs:
+        hi = [x for x in pairs if x[0] >= 0.5]
+        mid = [x for x in pairs if 0.35 <= x[0] < 0.5]
+        lo = [x for x in pairs if x[0] < 0.35]
+
+        L.append('## 要点溯源（不是评分，是复核的排序器）')
+        L.append('')
+        L.append('上面第 1 条盲区说「本报告不管语义忠实度」。这一节是对它的**部分回应**：')
+        L.append('不试图自动判对错，而是把每条要点与它在原文里最像的那句话并排摆出来 ——')
+        L.append('**人扫一眼就能判，机器只负责把最该看的排到前面。**')
+        L.append('')
+        L.append('| 与原文某句的措辞重合度 | 条数 | 占比 | 怎么理解 |')
+        L.append('|---|---|---|---|')
+        L.append(f'| ≥ 0.50 | {len(hi)} | {fmt_rate(rate(len(hi), len(pairs)))} | '
+                 f'要点大部分措辞能在原文某句里找到 —— **出处明确** |')
+        L.append(f'| 0.35–0.50 | {len(mid)} | {fmt_rate(rate(len(mid), len(pairs)))} | '
+                 f'一半左右对得上 —— 有改写，能追到意思 |')
+        L.append(f'| < 0.35 | {len(lo)} | {fmt_rate(rate(len(lo), len(pairs)))} | '
+                 f'原文里没有现成措辞 —— **归纳，或出错；建议从这里看** |')
+        L.append('')
+        L.append('> ⚠️ **这不是质量分，是排序器。** 三点必须说清：')
+        L.append('>')
+        L.append('> - **低分不等于写错了。** 归纳、改写、跨句合并都会把分数拉低 ——')
+        L.append('>   实测最低的那一档里，绝大多数是**正常归纳**（例如原文写'
+                 '「记得用酒精喷一下然后用餐巾纸擦拭」，卡片写「用酒精喷雾清洁手柄」——完全正确）。')
+        L.append('> - **它是非对称的。** 用的是「短的那边被覆盖了多少」，所以短要点')
+        L.append('>   天然容易得高分（成为长句的子集）—— 高分的含义是「措辞能找到出处」，')
+        L.append('>   不是「原句就是这么写的」。')
+        L.append('> - **分档阈值是启发式的。** 它唯一的作用是把最该看的排到前面：')
+        L.append('>   实测已知的那条问题（周刊的收录数）就排在第一行。')
+        L.append('')
+        L.append('### 相似度最低的 12 条（建议从这里开始复核）')
+        L.append('')
+        L.append('| 用例 | 卡片里的要点 | 原文里最像的一句 | 相似度 |')
+        L.append('|---|---|---|---|')
+        for score, cid, p, sent in sorted(pairs)[:12]:
+            L.append(f"| `{cid}` | {p[:64]} | {sent[-64:] if sent else '—'} | {score:.2f} |")
+        L.append('')
+        L.append('### 为什么不做成自动判定')
+        L.append('')
+        L.append('「意思讲反」和「张冠李戴」正是最该自动查的，但这三套方案我都试过，全失败：')
+        L.append('')
+        L.append('| 方案 | 做法 | 为什么不行 |')
+        L.append('|---|---|---|')
+        L.append('| A | 给要点锁定一句原文，再查「要点里的数字在不在那句里」 | '
+                 '模型常**跨句归纳**，锁定单句必然锁错，把正确归纳判成张冠李戴 |')
+        L.append('| B | 遍历数字在原文的**每次**出现，取上下文最像的那次 | '
+                 '改写同时破坏上下文相似度：实测正确的条目相似度只有 0.29，阈值划不出来 |')
+        L.append('| C | 查「数字+单位」在原文有没有同样的**紧邻**组合 | '
+                 '37 个样本命中 4 条：2 条是我自己的搜索 bug，1 条真命中但已被幻觉检查覆盖，'
+                 '1 条是误报 —— 原文写「也是**十分之一**」，模型写「差 10 倍」，**意思完全对** |')
+        L.append('')
+        L.append('> **结论：在当前条件下，机械判定「数字挂错了对象」不可靠。**')
+        L.append('> 根因是**改写**：只要模型换一种说法，字面上的对应关系就断了，')
+        L.append('> 而误报的代价比漏报高 —— 一个天天喊狼来了的指标，人很快就不看了。')
+        L.append('> 所以这里退回**给排序、不给定论**。')
+        L.append('')
 
     # —— 分组：形态 ——
     L.append('## 按输入形态分组（这是最该看的一张表）')
@@ -736,6 +953,15 @@ def main():
     print(f'  数字幻觉率      {fmt_rate(rate(iv, on))}  ({iv}/{on})')
     print(f'  专名覆盖（参考）{fmt_rate(rate(lh, lt))}  ({lh}/{lt})')
     print(f'  无锚点要点占比  {fmt_rate(rate(vg, pt))}  ({vg}/{pt})')
+
+    # 要点溯源：不是评分，是复核排序器。只报分布，不报「一个数」——
+    # 报一个数就会被当成质量分读。
+    tr = [s for r in rows for s, _ in r['_q']['traces']]
+    if tr:
+        lo = len([s for s in tr if s < 0.35])
+        print(f'  溯源到具体原句  {fmt_rate(rate(len(tr) - lo, len(tr)))}  '
+              f'({len(tr) - lo}/{len(tr)})   其余 {lo} 条需人工扫一眼')
+
     print(f'  评了 {len(rows)} 条')
     print()
 
