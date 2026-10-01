@@ -364,6 +364,9 @@ def calibrate(model=JUDGE_MODEL):
 # ---------------------------------------------------------------------------
 
 JUDGE_CACHE = os.path.join(EVAL, 'judge-results.json')
+# 人工复核的判定。**这不是指标、也不可复算** —— 它是「证据」，
+# 和 `cases.json` 里的金标准同类。所以单独存一个文件，脚本只负责渲染。
+REVIEW = os.path.join(EVAL, 'review.json')
 
 
 def _stamp():
@@ -427,6 +430,10 @@ def run(force=False):
     calib = None
     if os.path.exists(CALIB):
         calib = json.load(io.open(CALIB, encoding='utf-8'))
+    review = None
+    if os.path.exists(REVIEW):
+        review = json.load(io.open(REVIEW, encoding='utf-8'))
+        review = {(r['case'], r['point']): r for r in review['verdicts']}
 
     # ⚠️ 这里**不设 min_score** —— 要判全部要点。
     # 标定那边限制在 ≥0.5（控制组需要「明确被支持」的样本），
@@ -544,10 +551,58 @@ def run(force=False):
         L.append('> ⚠️ **「可以跳过」也不等于没问题。** 它只说明这条要点用到的数字在原文里存在，')
         L.append('> 不说明它的**论断方向**和原文一致 —— 方向对不对机器判不了（那正是 `quality.md` 溯源表管的事）。')
         L.append('')
+
+        # —— 人工复核那一桶（读整篇原文，因为锚点判据在这一桶上帮不上忙）——
+        if review:
+            rev = [review.get((f['case'], f['point'])) for f in flagged]
+            rev = [r for r in rev if r]
+            n_bad = sum(1 for r in rev if r['verdict'] == '真问题')
+            n_doubt = sum(1 for r in rev if r['verdict'] == '存疑')
+            n_ok = sum(1 for r in rev if r['verdict'] == '不是问题')
+            machine_real = len(bucket.get('全篇也无', []))
+            L.append('### 人工复核：无锚点那 18 条，逐条读了整篇原文')
+            L.append('')
+            L.append('| 复核结论 | 条数 |')
+            L.append('|---|---|')
+            L.append(f'| 不是问题（judge 误报） | {n_ok} |')
+            L.append(f'| **真问题** | **{n_bad}** |')
+            L.append(f'| 存疑（超出原文的推断，但与原文不冲突） | {n_doubt} |')
+            L.append('')
+            L.append('> 复核方式是**读整篇原文** —— judge 只看到「所在段落 + 前后各一段」，')
+            L.append('> 而这 18 条恰好是「锚点判据帮不上忙」的那一批，只能靠读全篇。')
+            L.append('> ⚠️ 这仍然是**第三个意见，不是金标准**；它比 judge 强的地方只有一个：能看到全篇。')
+            L.append('')
+            L.append('**把三层合起来看**（这是本报告真正该给出的数字）：')
+            L.append('')
+            L.append(f'    221 条要点 → judge 报 {len(flagged)} 条可疑')
+            L.append(f'      → 机器清掉 {len(bucket.get("数字在别处", [])) + len(bucket.get("仅专名在别处", []))} 条（锚点在原文别处，是判断窗口的问题）')
+            L.append(f'      → 剩 {machine_real + len(rev)} 条：{machine_real} 条机器已核实为真、{len(rev)} 条人工读过')
+            L.append(f'      → **最终确认 {machine_real + n_bad} 条为真**，另有 {n_doubt} 条存疑')
+            L.append('')
+            L.append('#### 确认的问题（逐条附原文依据）')
+            L.append('')
+            for r in rev:
+                if r['verdict'] in ('真问题', '存疑'):
+                    L.append(f"- **`{r['case']}`**（{r['verdict']}）：{r['point']}")
+                    L.append(f"  - 依据：{r['evidence']}")
+                    L.append(f"  - 判断：{r['note']}")
+            L.append('')
+            L.append('> **3 条真问题里有 2 条是同一个根因：评论区 / 推荐区的内容被当成了正文。**')
+            L.append('> ——「用户反馈表明……」（评论区根本没人反馈过使用效果）、')
+            L.append('> 「作者认为 AI 最大问题不是重复造轮子……」（「重复造轮子」出自**读者评论**，')
+            L.append('> 作者的主张是「AI 自作主张」，而且「不是 A 而是 B」这个对比在原文里不存在）。')
+            L.append('> 这不是「编造」，是**把别处的内容记到了本文头上** —— 锚点判据永远抓不到这一类，')
+            L.append('> 因为每个词都能在原文里找到。')
+            L.append('')
+
         L.append('按溯源重合度升序 —— **低分那端更可能是真问题**。')
         L.append('')
-        L.append('| 用例 | 溯源分 | 锚点 | 摘要 | judge 的理由 |')
-        L.append('|---|---|---|---|---|')
+        if review:
+            L.append('| 用例 | 溯源分 | 锚点 | 摘要 | 人工复核 | judge 的理由 |')
+            L.append('|---|---|---|---|---|---|')
+        else:
+            L.append('| 用例 | 溯源分 | 锚点 | 摘要 | judge 的理由 |')
+            L.append('|---|---|---|---|---|')
         for f in sorted(flagged, key=lambda x: x['score']):
             a = f['anchors']
             if f['bucket'] == '全篇也无':
@@ -558,15 +613,23 @@ def run(force=False):
                 mark = '仅专名：' + '、'.join(a['else_lat'][:3])
             else:
                 mark = '—'
-            L.append(f"| `{f['case']}` | {f['score']:.2f} | {mark} | "
-                     f"{f['point'][:58]} | {f['why'][:70]} |")
+            rv = review.get((f['case'], f['point'])) if review else None
+            if review:
+                v = ({'真问题': '**真问题**', '存疑': '存疑'}.get(rv['verdict'], '不是问题')
+                     if rv else '（未复核）')
+                L.append(f"| `{f['case']}` | {f['score']:.2f} | {mark} | "
+                         f"{f['point'][:52]} | {v} | {f['why'][:56]} |")
+            else:
+                L.append(f"| `{f['case']}` | {f['score']:.2f} | {mark} | "
+                         f"{f['point'][:58]} | {f['why'][:70]} |")
         L.append('')
     L.append('## 这个指标看不见什么')
     L.append('')
     L.append('- **只能排序，不能当闸门。** 特异度不是 100%：拿它自动拦截用户的内容，'
              '就会按误报率冤枉一部分正常内容。它的定位是**把人的注意力引到该看的地方**。')
     L.append('- **判断依据是原文片段**（所在段落 + 前后各一段），不是整篇。'
-             '所以上面有 13 条被指出的问题，其实是「依据在窗口之外」而非真问题。')
+             f'所以上面有 {len(bucket.get("数字在别处", [])) + len(bucket.get("仅专名在别处", []))} 条'
+             '被指出的问题，其实是「依据在窗口之外」而非真问题。')
     L.append('- **只判「有没有依据」，不判「写得值不值得读」。** 一条完全忠实但空洞的要点，'
              '在这里也是满分的。')
     L.append('- **18 条纯中文论断机器帮不上忙。** 试过退一步用「4 字词组是否在原文别处出现」来清，'
@@ -574,6 +637,17 @@ def run(force=False):
     L.append('  例如「流鼻涕是鼻腔的正常反应」被判「别处有（正常反应）」，而**原文写的是「鼻涕要忍住不擦」，'
              '两者真冲突**；还有 `Clippi` 这种名字被切成 `ppi可` 的碎片也算命中。')
     L.append('  按本项目的规矩（**命中里误报 ≥ 真报的检查不该以指标形式存在**），宁可不做。')
+    L.append('- ⚠️ **「内容是真的、但记错了出处」这一类，本指标结构上看不见。**')
+    L.append('  它的判据是「原文支不支持这条说法」—— 而这类问题的每个词都能在原文里找到，'
+             '锚点全中、judge 也会判「支持」。实测最终确认的 4 条问题里，**2 条是这一类**：')
+    L.append('  「用户反馈表明……」（评论区根本没人反馈过）、「作者认为……重复造轮子……」'
+             '（那句出自**读者评论**，作者主张的是另一件事）。')
+    L.append('  根因是**评论区与推荐区没被当成页面装饰裁掉**：')
+    L.append('  `eval/run.mjs` 把**整份快照**喂给模型，而 `strip_chrome` 只裁了徽标 / 日期 / 邮箱这类零碎。'
+             '实测 21 份快照里 **5 份含「相似内容」推荐区**，最多的一篇占全文 **52.3%**；'
+             '这 5 份里 **23.9% 的数字锚**落在推荐区。而最终确认的 4 条问题**全部**出自这 5 份。')
+    L.append('  → **要修的话在抓取侧**（裁掉评论正文与推荐区），不是调 judge 提示词；'
+             '顺带也能让 `quality.md` 的召回率分母更干净。')
     L.append('')
 
     out = os.path.join(EVAL, 'faithfulness.md')
@@ -583,6 +657,15 @@ def run(force=False):
         for k in ('数字在别处', '仅专名在别处', '全篇也无', '无锚点'):
             if k in bucket:
                 print(f'    {k:12s} {len(bucket[k]):3d} 条')
+    if review:
+        rev = [review.get((f['case'], f['point'])) for f in flagged]
+        rev = [r for r in rev if r]
+        bad = sum(1 for r in rev if r['verdict'] == '真问题')
+        dbt = sum(1 for r in rev if r['verdict'] == '存疑')
+        real = len(bucket.get('全篇也无', [])) + bad
+        print(f'  人工已复核 {len(rev)} 条：真问题 {bad} / 存疑 {dbt} / '
+              f'不是问题 {len(rev) - bad - dbt}')
+        print(f'  ★ 最终确认为真：{real} 条（另有 {dbt} 条存疑）')
     print(f'  报告已写入 {os.path.relpath(out, ROOT)}')
     return 0
 
