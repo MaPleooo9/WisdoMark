@@ -431,7 +431,7 @@ def report(dataset, results, m):
     L.append('| 图文帖 OCR（Tesseract） | 评测喂的是已拼好的正文快照，识别质量本身没有指标 | 人工抽查；本报告不含该项 |')
     L.append('| 归档去重（URL 归一化） | `store.js` 的逻辑不在这条链路上 | 开发期独立验证脚本（仓库外）|')
     L.append('| 抓取时序（等正文渲染稳定） | 评测用固定快照，生产依赖 `chrome.tabs` | 人工在真实页面上观察 |')
-    L.append('| 要点完整度 / 摘要幻觉 | 需要人工判断 | 计划中的人工评分表 |')
+    L.append('| 要点完整度 / 摘要幻觉 | 本报告只算分类与护栏，不评摘要质量 | `quality.py` → `quality.md`（纯计算、不调模型：数字召回 / 数字幻觉 / 漏条目）|')
     L.append('')
 
     L.append('## 逐条明细')
