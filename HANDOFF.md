@@ -411,7 +411,7 @@ WisdoMark 的知识资产分两处：**仓库内**（跟着 git 走，clone 即�
 | 资产 | 路径 | 是什么 / 为什么重要 |
 |---|---|---|
 | **WisdoMark 专属技能库** ⭐ | `C:/Users/Mapleooo/.workbuddy/skills/chrome-mv3-local-llm-extension/SKILL.md` | 本项目 30+ 节实测方法论（推送配方 / MV3 硬限制 / tesseract 必抄配置 / 无头端到端验收 / OCR 质量门 / Ollama 重装 / 判 judge 的方法论 / 忠实度机械判不出的根因…）。**全项目最值钱的一份**，动手前应整篇过一遍 |
-| **仓库外验证工具** ⭐ | `C:/Users/Mapleooo/.workbuddy/tools/wisdomark/` | 约 29 个无头验证 / 验收脚本：`wm-acceptance.mjs`（全新 profile 端到端验收）、`wm-demo-gif.mjs` + `wm-gif.py`（演示 GIF，不用 ffmpeg）、`wm-judge-exp.py`（judge 原型）、`wm-backup-test.mjs`（归档导出/导入的合并语义 + 消息路由边界）、`_harness.mjs` / `_mock-ollama.mjs`（基础设施）、`wm-*-test.mjs` / `wm-*-ui.mjs`（各功能单测）。「验证手段不进仓库」是明确取舍，所以全在本机 |
+| **仓库外验证工具** ⭐ | `C:/Users/Mapleooo/.workbuddy/tools/wisdomark/` | 约 29 个无头验证 / 验收脚本：`wm-acceptance.mjs`（全新 profile 端到端验收）、`wm-demo-gif.mjs` + `wm-gif.py`（演示 GIF，不用 ffmpeg）、`wm-judge-exp.py`（judge 原型）、`wm-backup-test.mjs` / `wm-backup-ui-test.mjs`（归档导出/导入：前者验合并语义与消息路由，后者验 UI 层 —— 真点按钮 / 真下载 / 真给 file input 塞文件）、`_harness.mjs` / `_mock-ollama.mjs`（基础设施）、`wm-*-test.mjs` / `wm-*-ui.mjs`（各功能单测）。「验证手段不进仓库」是明确取舍，所以全在本机 |
 | 用户级长期记忆 | `C:/Users/Mapleooo/.workbuddy/user-d5380b4d-bbb0-417b-8e52-acc901052d96-personal/MEMORY.md` | 跨项目通用规则：push 按天不自动推、提交身份 `iKnowuHateme <488302730@qq.com>`、GitHub 首超先重试、本环境 git 的 refs 写入坑、npm/PATH 坑、Ollama 环境坑 |
 | 用户画像 | `C:/Users/Mapleooo/.workbuddy/user-d5380b4d-bbb0-417b-8e52-acc901052d96-personal/USER.md` | 邓瑶琦的背景、目标方向、协作偏好 |
 | 项目长期记忆 | `D:/PROJECT/WisdoMark/.workbuddy/memory/MEMORY.md` | 项目级约定与技术结论（单一来源 / 机械判别 / prompt 饱和 / 评测三条硬规矩 / 会自己过期的表述…）|
