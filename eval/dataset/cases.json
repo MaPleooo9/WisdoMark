@@ -336,6 +336,42 @@
         "category": "工具与产品"
       },
       "note": "作者 2026-09-20 新收藏的一条（收藏夹 22 → 23）。看过正文确认分类：介绍开源项目 stop-that-shit —— 一个在 AI 编程工具动手前拦截「自作主张」的 Hook，有安装命令、支持的工具列表、用法示例 → **工具与产品**（读者动作是「决定装不装」）。"
+    },
+    {
+      "id": "probe-long-truncate",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-long-truncate",
+      "title": "从零实现一个迷你 LSM 键值存储引擎",
+      "text": "texts/probe-long-truncate.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "**超长内容（性能 + 截断路径）**。手写探针，实测 13162 字，**超过 maxInputChars(12000)** —— 会触发 `digest.js` 的 `truncateText` 按句末截断（约截掉尾部 1162 字）。测两件事：① 截断分支真的被走到、且截断后仍产出合规 JSON（不因超长而校验失败）；② 12000 字天花板下的单条耗时（性能上限）。**为什么用探针而不是真实长文**：本环境抓不到超过 12000 字的真实正文 —— 维基百科 / GitHub 不可达；掘金 / 博客园 / CSDN 经 content-script 提取后只有 2–3 千字，且博客园那篇被作者的文章列表污染。金标准建议「技术学习」（单一主题长教程）。**待作者裁决**。"
+    },
+    {
+      "id": "probe-soft-ad",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-soft-ad",
+      "title": "连着开了十七个会之后，我把会议纪要外包给了它",
+      "text": "texts/probe-soft-ad.txt",
+      "expect": {
+        "ok": true,
+        "category": "工具与产品"
+      },
+      "note": "**营销软文**。手写探针。软文的边界不在「要不要消化」而在**分类**：按判据，`ok:false` 只留给「页面本身没有内容」，软文有内容、信息量也不为零（判据明写「信息量偏少不是判 false 的理由」），所以金标准是 `ok:true`；真正要判的是它围绕**一个具体产品**展开（功能、怎么用、值不值得用）→ 「工具与产品」，而不是「其他」（个人体验分享）或「资讯与公告」。这条同时检验模型会不会因为「像广告」而**误拒**。金标准建议 `ok:true` / 工具与产品。**待作者裁决**。"
+    },
+    {
+      "id": "probe-image-post",
+      "source": "probe",
+      "url": "https://example.com/probe/probe-image-post",
+      "title": "旧笔记本改家庭服务器，全过程图都在这",
+      "text": "texts/probe-image-post.txt",
+      "expect": {
+        "ok": true,
+        "category": "技术学习"
+      },
+      "note": "**图文帖 OCR**。手写探针：正文几乎全在图片里，抽出来（OCR）的文字是图注式的碎片，约 461 字。测的边界是「**图文帖正文稀疏时会不会被误判 `ok:false`**」—— 按判据，`ok:false` 只留给「页面本身没有内容」，图文帖的内容在图片里、并非没有内容，所以金标准 `ok:true`。⚠️ **OCR 识别质量本身不在评测链路里**（评测喂的是已拼好的正文快照，见 `report.md` 的「评测覆盖不到的地方」），这条只测模型对「OCR 风格的碎片正文」的处理。正文含大量技术对象（Ubuntu Server、OpenSSH、Samba、ext4、/mnt/data、ssh）→ 建议「技术学习」。**待作者裁决**。"
     }
   ],
   "_reviewed": "金标准已经过人工裁决（2026-09-19，三轮）。expect 是裁判后的结果，不是初标值。",

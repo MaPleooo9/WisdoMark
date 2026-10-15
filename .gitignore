@@ -33,3 +33,4 @@ venv/
 eval/results/
 eval/snapshots/*.txt
 *.local.json
+*.smoke.json

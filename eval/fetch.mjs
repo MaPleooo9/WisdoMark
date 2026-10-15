@@ -53,11 +53,30 @@ const contentScript = fs
   .readFileSync(path.join(ROOT, 'src/content/content-script.js'), 'utf8')
   .replace(/const MAX_IMAGES = \d+;/, 'const MAX_IMAGES = 60;');
 
+// 合成样本（边界探针 + 负样本）的 url 是 `https://example.com/...` 占位符，
+// 快照是**手写**的，不是抓来的。`--force` 必须跳过它们 ——
+// 实测代价（2026-10-15）：`--force` 跑一遍，4 条探针快照被 example.com 的
+// 「Example Domain」正文覆盖，手写样本直接丢失（靠备份才还原回来）。
+const SYNTHETIC_SOURCES = new Set(['probe', 'negative']);
+
+// 站点反爬 / 限流页**绝不能落盘**。实测（2026-10-15）：小黑盒对连续抓取返回
+// 「尝试太多了 / 2s后自动为您刷新验证码」的 247 字空壳（正文只剩页脚 + 备案号），
+// 被原样写进快照 —— 直接把这条用例的正文换成了反爬页，分数从此失去意义。
+// 这类页面按「抓取失败」处理：不写文件、报 fail，旧快照原样保留。
+const BLOCKED_PAGE = /(尝试太多了|刷新验证码|访问过于频繁|操作太频繁|请完成验证|安全验证|人机验证)/;
+
 const targets = dataset.cases.filter((c) => {
   if (ONLY && !ONLY.includes(c.id)) return false;
-  if (FORCE) return true;
+  if (FORCE) return !SYNTHETIC_SOURCES.has(c.source);
   return !fs.existsSync(path.join(DATASET, c.text));
 });
+
+if (FORCE) {
+  const skipped = dataset.cases.filter((c) => SYNTHETIC_SOURCES.has(c.source));
+  if (skipped.length) {
+    console.log(`--force 跳过 ${skipped.length} 条合成样本（快照是手写的，抓不得）：${skipped.map((s) => s.id).join(', ')}\n`);
+  }
+}
 
 if (!targets.length) {
   console.log('没有需要抓的（都已有快照）。要重抓加 --force。');
@@ -169,6 +188,12 @@ for (const item of targets) {
   if (!r.ok || !r.text) {
     report.push({ ...item, chars: 0, status: 'fail', detail: r.error || '正文为空' });
     console.log(`  ❌ ${item.id.padEnd(18)} 抓不到（${r.error || '正文为空'}）`);
+    continue;
+  }
+
+  if (BLOCKED_PAGE.test(r.text)) {
+    report.push({ ...item, chars: 0, status: 'fail', detail: '站点限流 / 反爬页' });
+    console.log(`  ❌ ${item.id.padEnd(18)} 抓不到（站点限流 / 反爬页，未落盘，保留旧快照）`);
     continue;
   }
 

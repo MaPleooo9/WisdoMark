@@ -543,7 +543,11 @@ def check_case(text, got, shape):
 # ---------------------------------------------------------------------------
 
 def load_shapes():
-    """形态由生产代码的 detectShape 决定 —— 直接调它，不在 Python 里抄一份正则。"""
+    """形态 + 模型实际看到的字数，都由生产代码决定 —— 直接调它，不在 Python 里抄一份正则。
+
+    `shapes.mjs` 同时用生产的 `truncateText` 报出 `usedChars`：
+    超长正文入模前会被截断，标尺必须对齐到「模型实际看到的那一份」（见 `compute()`）。
+    """
     node = os.environ.get('NODE_BIN') or 'node'
     try:
         out = subprocess.run(
@@ -582,12 +586,14 @@ def compute(dataset, results, shapes):
         c = cases.get(r['id'])
         if not c:
             continue
-        r['_shape'] = shapes.get(r['id'], 'single')
-        r['_q'] = check_case(
-            io.open(os.path.join(DATASET, c['text']), encoding='utf-8').read(),
-            r['got'],
-            r['_shape'],
-        )
+        sh = shapes.get(r['id']) or {}
+        r['_shape'] = sh.get('shape', 'single')
+        r['_truncated'] = bool(sh.get('truncated'))
+        # 标尺 = **模型实际看到的输入**。超长正文入模前被 truncateText 按句末截断，
+        # 若仍拿磁盘上的完整原文当标尺，被截掉的尾巴里的数字会被记成「漏了」，
+        # 而模型根本没见过它们 —— 那是**标尺的错**，不是模型的错。
+        src = io.open(os.path.join(DATASET, c['text']), encoding='utf-8').read()[: sh.get('usedChars')]
+        r['_q'] = check_case(src, r['got'], r['_shape'])
         ok_rows.append(r)
     return ok_rows
 
@@ -640,6 +646,14 @@ def report(rows, meta):
              f"锚点 {num_total + lat_total} 个（数字 {num_total} · 专名 {lat_total}），"
              f"输出侧数字 {out_num_total} 个。")
     L.append('')
+
+    trunc = [r['id'] for r in rows if r.get('_truncated')]
+    if trunc:
+        L.append(f"> ⚠️ 其中 {len(trunc)} 条（{'、'.join('`' + i + '`' for i in trunc)}）的原文超过 "
+                 f"`maxInputChars`，入模前被 `truncateText` 按句末截断。"
+                 f"**本报告的标尺已对齐到截断后的正文**（`shapes.mjs` 用生产的 `truncateText` 报出 `usedChars`），"
+                 f"也就是「模型实际看到的那一份」—— 截掉的尾巴不算「漏」，因为它没被喂给模型。")
+        L.append('')
     L.append('> ⚠️ **两侧的分母口径刻意不同，别拿它们相除：**')
     L.append('>')
     L.append(f"> - **召回率的分母（原文锚点 {num_total} 个）**：正文区域 + "

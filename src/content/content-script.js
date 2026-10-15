@@ -32,6 +32,63 @@ if (!window.__wisdomark) {
   ];
 
   // ---------------------------------------------------------------------------
+  // 评论区 / 「相似内容」推荐区：抓取侧要裁掉
+  //
+  // 由忠实度复核发现（2026-10-01）：这两块被当成正文喂给模型时，模型会把**读者的评论
+  // 安到作者头上** —— 实测最终确认的 4 条真问题里 2 条根因在此（「用户反馈表明……」
+  // 而评论区没有任何人反馈过使用效果；「作者认为……」而那句出自读者评论）。
+  // 量化：21 份快照 5 份含推荐区，最多占全文 52.3%；这 5 份里 23.9% 的数字锚落在推荐区。
+  //
+  // 修在这里而不是 prompt —— prompt 已饱和（见 AGENTS.md），且这类错误锚点判据根本看不见
+  // （每个词都能在原文里找到，只是出处是评论区）。也不能交给模型：那是让模型去猜哪句话是谁说的。
+  // ---------------------------------------------------------------------------
+
+  const SECTION_KEYWORDS =
+    'comment|comments|pinglun|reply|replies|discuss|discussion|recommend|recommendations|related|similar|guess-?like';
+
+  // ① 分隔符形态（BEM / kebab / 尾部 snake）：link-comment__list、related-recommend__container、js_comment。
+  //    关键词前后必须是 - 或 __ 或边界。**单下划线不算** —— 这一刀把「组件名」和「功能开关」分开：
+  //    实测公众号把 comment_feature / discuss_tab 挂在 <body> 上，认了它会把整篇文章裁掉（实测 99.9%）。
+  const SECTION_TOKEN_SEP = new RegExp(`(^|[-_])(?:${SECTION_KEYWORDS})(-|__|$)`, 'i');
+
+  // ② camelCase 形态：postComment、CommentList、relatedPosts
+  const SECTION_TOKEN_CAMEL =
+    /(?:^|[a-z])(?:[Cc]omment|[Cc]omments|[Rr]epl(?:y|ies)|[Rr]ecommend(?:ations)?|[Rr]elated|[Ss]imilar|[Dd]iscuss(?:ion)?|[Pp]inglun|[Gg]uessLike)(?:[A-Z]|$)/;
+
+  // 文字锚点：区块自己的标题。有些站点 class 不带关键词，但区块开头就是「评论」「相关推荐」。
+  const SECTION_ANCHOR =
+    /^(全部评论|最新评论|热门评论|评论|回复|暂无评论|发表评论|相关推荐|推荐阅读|相关阅读|猜你喜欢|热门推荐|更多精彩|为你推荐|相似内容|相关文章|继续阅读|你可能还喜欢)/;
+
+  const HEADING_TAGS = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+
+  // 截断后至少保留这么多字，否则放弃截断（退化为整页）。取 400 与 page.js 的
+  // MIN_CONTENT_CHARS 同值 —— 低于它会被判成「没抓到正文」，宁可留着评论区也不能让用户看到「抓不到」。
+  const MIN_KEEP_CHARS = 400;
+  // 截断点必须出现在正文靠后的位置。防的是「整篇文章被套在一个名字带 recommend 的容器里」
+  // 时从 0 字处就裁掉。
+  const MIN_CUT_OFFSET = 200;
+
+  // 判定一个元素是不是「评论区 / 推荐区」的边界。
+  // 结构特征（class/id 组件名）为主；标题锚点为辅 —— 后者只认标题级元素，
+  // 免得正文里某个「回复」按钮把小半个正文裁掉。
+  function sectionKind(el) {
+    const marker = `${el.getAttribute?.('class') || ''} ${el.getAttribute?.('id') || ''}`;
+
+    if (
+      marker.trim() &&
+      marker.split(/\s+/).some((t) => SECTION_TOKEN_SEP.test(t) || SECTION_TOKEN_CAMEL.test(t))
+    ) {
+      return 'marker';
+    }
+
+    if (HEADING_TAGS.has(el.tagName) && SECTION_ANCHOR.test((el.textContent || '').trim())) {
+      return 'anchor';
+    }
+
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
   // 正文图片（给 OCR 用）
   //
   // 图文帖（B 站 opus、小红书笔记、公众号长图）的干货全在图里，文字只有开场白。
@@ -89,11 +146,15 @@ if (!window.__wisdomark) {
     return false;
   }
 
-  function collectImages(root) {
+  function collectImages(root, cutEl) {
     const out = [];
     const seen = new Set();
 
     for (const img of root.querySelectorAll('img')) {
+      // 评论区 / 推荐区里的图不是正文图。不排掉的话，推荐位的缩略图会被当成正文图
+      // 触发一次 OCR（正文被裁短之后尤其容易 —— OCR 的触发条件正是「正文短 + 图多」）。
+      if (cutEl && cutEl.compareDocumentPosition(img) & Node.DOCUMENT_POSITION_FOLLOWING) continue;
+
       // 懒加载的图没渲染时 naturalWidth 是 0，但外层通常用 CSS 占好了位置，
       // 所以优先信 getBoundingClientRect
       const rect = img.getBoundingClientRect();
@@ -114,11 +175,42 @@ if (!window.__wisdomark) {
     return out;
   }
 
+  function normalizeText(s) {
+    return s
+      .replace(/[ \t\u00a0]+/g, ' ')
+      .replace(/ *\n */g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  // 挑截断点：在候选里取**最早**的一个，但必须同时过两道保守闸门 ——
+  //   ① 位置：不能出现在正文很靠前的地方（防「整篇文章套在名字带 recommend 的容器里」时从 0 字处裁掉）
+  //   ② 剩余：裁完至少还得剩 MIN_KEEP_CHARS，否则宁可留着评论区
+  // 达不到就返回 null = 退化为「整页喂入」，即保持现状、不劣化。
+  // 标题锚点（anchor）的门槛更严：它比结构特征弱，只在正文过半之后才算数。
+  function pickCut(candidates, total) {
+    let best = null;
+
+    for (const [el, { offset, kind }] of candidates) {
+      const minOffset = Math.max(MIN_CUT_OFFSET, Math.round(total * (kind === 'anchor' ? 0.5 : 0.15)));
+      if (offset < minOffset) continue;
+      if (total - offset < MIN_KEEP_CHARS) continue;
+      if (!best || offset < best.offset) best = { el, offset };
+    }
+
+    return best;
+  }
+
   // 用 TreeWalker 收集文本节点。
   // 不用 cloneNode + innerText：节点脱离文档后 innerText 会退化成 textContent，
   // 换行信息全部丢失，拼出来的正文是一整团。
-  function collectText(root) {
+  //
+  // 同时定位「截断点」—— 文本与截断点必须一起算：截断点是按文本累计偏移定位的，
+  // 分成两次遍历会得到对不上的偏移。
+  function analyze(root) {
     const parts = [];
+    const candidates = new Map();
+    let cursor = 0;
 
     const walker = document.createTreeWalker(
       root,
@@ -128,7 +220,10 @@ if (!window.__wisdomark) {
           if (node.nodeType === Node.ELEMENT_NODE) {
             // FILTER_REJECT = 连同整棵子树一起跳过
             if (NOISE_TAGS.has(node.tagName)) return NodeFilter.FILTER_REJECT;
-            if (BLOCK_TAGS.has(node.tagName)) parts.push('\n');
+            if (BLOCK_TAGS.has(node.tagName)) {
+              parts.push('\n');
+              cursor += 1;
+            }
             return NodeFilter.FILTER_SKIP;
           }
 
@@ -140,15 +235,39 @@ if (!window.__wisdomark) {
     );
 
     while (walker.nextNode()) {
-      parts.push(walker.currentNode.nodeValue);
+      const value = walker.currentNode.nodeValue;
+
+      // 从当前文本节点往上找候选区块，但**不含 root 本身** ——
+      // 实测公众号把 comment_feature 挂在 <body> 上，连 body 一起认就会裁掉整篇。
+      let node = walker.currentNode.parentElement;
+      while (node && node !== root) {
+        if (!candidates.has(node)) {
+          const kind = sectionKind(node);
+          if (kind) candidates.set(node, { offset: cursor, kind });
+        }
+        node = node.parentElement;
+      }
+
+      parts.push(value);
+      cursor += value.length;
     }
 
-    return parts
-      .join('')
-      .replace(/[ \t\u00a0]+/g, ' ')
-      .replace(/ *\n */g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    const raw = parts.join('');
+    const cut = pickCut(candidates, cursor);
+
+    if (cut) {
+      const truncated = normalizeText(raw.slice(0, cut.offset));
+      // 闸门按**归一化之后**的长度算 —— 归一化会略微变短，按原始长度卡的话，
+      // 刚好卡在 400 的页面会跌到 page.js 的 MIN_CONTENT_CHARS 之下、被判成「没抓到正文」。
+      // 宁可把评论区一起留下，也不能让用户看到「抓不到」。
+      if (truncated.length >= MIN_KEEP_CHARS) return { text: truncated, cutEl: cut.el };
+    }
+
+    return { text: normalizeText(raw), cutEl: null };
+  }
+
+  function collectText(root) {
+    return analyze(root).text;
   }
 
   // 挑一个最像正文的容器：语义化容器里文本最长的那个，够长就直接用
@@ -238,11 +357,12 @@ if (!window.__wisdomark) {
   window.__wisdomark = {
     extract() {
       const root = pickRoot();
-      const text = collectText(root);
+      const { text, cutEl } = analyze(root);
 
       // 只把前 MAX_IMAGES 张交出去（一张约 1.5 秒，不封顶会让人等到怀疑卡死），
       // 但真正的总数要一起报上去 —— 摘要漏掉后半篇时，用户得知道是这里截的。
-      const all = collectImages(root);
+      // 评论区 / 推荐区的图不算正文图（cutEl 之后的全部跳过）。
+      const all = collectImages(root, cutEl);
 
       return {
         ok: true,
