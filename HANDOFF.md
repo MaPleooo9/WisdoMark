@@ -388,7 +388,34 @@ python eval/quality.py   # → eval/quality.md
 
 ---
 
-## 九、目前的 git 状态
+## 九、交接资产位置总表（仓库外的东西都在哪）
+
+WisdoMark 的知识资产分两处：**仓库内**（跟着 git 走，clone 即有）和**仓库外**（只在本机 `~/.workbuddy/`，不进 git）。要完整交接给下一个智能体，**必须连同仓库外这几处一起给**。
+
+| 资产 | 路径 | 是什么 / 为什么重要 |
+|---|---|---|
+| **WisdoMark 专属技能库** ⭐ | `C:/Users/Mapleooo/.workbuddy/skills/chrome-mv3-local-llm-extension/SKILL.md` | 本项目 30+ 节实测方法论（推送配方 / MV3 硬限制 / tesseract 必抄配置 / 无头端到端验收 / OCR 质量门 / Ollama 重装 / 判 judge 的方法论 / 忠实度机械判不出的根因…）。**全项目最值钱的一份**，动手前应整篇过一遍 |
+| **仓库外验证工具** ⭐ | `C:/Users/Mapleooo/.workbuddy/tools/wisdomark/` | 约 29 个无头验证 / 验收脚本：`wm-acceptance.mjs`（全新 profile 端到端验收）、`wm-demo-gif.mjs` + `wm-gif.py`（演示 GIF，不用 ffmpeg）、`wm-judge-exp.py`（judge 原型）、`_harness.mjs` / `_mock-ollama.mjs`（基础设施）、`wm-*-test.mjs` / `wm-*-ui.mjs`（各功能单测）。「验证手段不进仓库」是明确取舍，所以全在本机 |
+| 用户级长期记忆 | `C:/Users/Mapleooo/.workbuddy/user-d5380b4d-bbb0-417b-8e52-acc901052d96-personal/MEMORY.md` | 跨项目通用规则：push 按天不自动推、提交身份 `iKnowuHateme <488302730@qq.com>`、GitHub 首超先重试、本环境 git 的 refs 写入坑、npm/PATH 坑、Ollama 环境坑 |
+| 用户画像 | `C:/Users/Mapleooo/.workbuddy/user-d5380b4d-bbb0-417b-8e52-acc901052d96-personal/USER.md` | 邓瑶琦的背景、目标方向、协作偏好 |
+| 项目长期记忆 | `D:/PROJECT/WisdoMark/.workbuddy/memory/MEMORY.md` | 项目级约定与技术结论（单一来源 / 机械判别 / prompt 饱和 / 评测三条硬规矩 / 会自己过期的表述…）|
+| 项目工作日志 | `D:/PROJECT/WisdoMark/.workbuddy/memory/2026-*.md` | 逐日实操记录，共 13 篇；排查历史问题先查这里 |
+| 通用技能库（按需） | `C:/Users/Mapleooo/.workbuddy/skills/` 下 `git-dual-remote-identity` / `code-review-and-quality` / `debugging-and-error-recovery` / `incremental-implementation` / `test-driven-development` 等 | 跨项目通用；其中 **`git-dual-remote-identity` 与推送强相关**（双远端身份、force-with-lease 绕过都写在那）|
+
+> **仓库内的规范类文件**（都在 git 里，clone 即有）：`AGENTS.md`（工作约定 / 硬约束）、`README.md`（怎么用）、`HANDOFF.md`（本文，接手总览）、`eval/README.md` + `eval/report.md` + `eval/quality.md` + `eval/faithfulness.md`（评测）、`LICENSE`。
+
+**交接给下一个智能体的最小集**（按优先级，前 4 项建议全给）：
+
+1. `HANDOFF.md`（本文）—— 进度 + 头号任务 + 怎么干 + 资源位置
+2. `chrome-mv3-local-llm-extension/SKILL.md` —— 本项目全部实测坑与方法论
+3. 两份 `MEMORY.md`（用户级 + 项目级）—— 硬性约定与协作规则
+4. `C:/Users/Mapleooo/.workbuddy/tools/wisdomark/` —— 验证脚本（要重跑验收就得靠它）
+
+其余（`USER.md` / 通用 skill / 工作日志）按需。
+
+---
+
+## 十、目前的 git 状态
 
 - 两个远端：GitHub（`MaPleooo9/WisdoMark`）与 Gitee（`iKnowuHateme/wisdo-mark`）
 - **核对同步状态一律用 `git ls-remote --heads <remote> main`**，不要看 `git status` ——
