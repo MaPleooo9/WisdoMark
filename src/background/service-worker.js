@@ -14,7 +14,10 @@
 import { pingOllama } from './llm.js';
 import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
 import { digestDocument, rankBatch, buildProfile, buildActionPlan } from './digest.js';
-import { saveDigest, countDigests, listDigests, getDigest, searchDigests, listStaleDigests } from './store.js';
+import {
+  saveDigest, countDigests, listDigests, getDigest, searchDigests, listStaleDigests,
+  readAllDigests, importDigests, MAX_IMPORT_RECORDS
+} from './store.js';
 import { loadShared } from './shared.js';
 import { buildTrace, recordFailure, listFailures, clearFailures } from './trace.js';
 
@@ -462,6 +465,45 @@ async function searchArchive({ keyword = '', category = '', limit = 30, before =
   }
 }
 
+// 导出：把整库原样交给侧栏，由侧栏打包成文件下载。
+// 这里**不做投影**（与 searchArchive 相反）—— 备份要的是完整记录，
+// 少一个字段就是少一份数据；也正因如此，给记录加字段时不必再改这里。
+async function exportArchive() {
+  try {
+    const records = await readAllDigests();
+    return {
+      ok: true,
+      format: 'wisdomark-archive',
+      formatVersion: 1,
+      exportedAt: new Date().toISOString(),
+      count: records.length,
+      records
+    };
+  } catch (err) {
+    return { ok: false, error: `读归档失败：${err?.message || err}` };
+  }
+}
+
+// 导入：边界校验放在这一层 —— 消息另一头是「用户选的文件」，
+// 属于系统边界，坏数据要在进库之前挡住（形状校验与去重规则见 store.js）。
+async function importArchive({ records } = {}) {
+  const list = Array.isArray(records) ? records : null;
+  if (!list || !list.length) return { ok: false, error: '这个文件里没有可导入的归档记录' };
+  if (list.length > MAX_IMPORT_RECORDS) {
+    return {
+      ok: false,
+      error: `文件里有 ${list.length} 条，超过上限 ${MAX_IMPORT_RECORDS} 条，没有导入`
+    };
+  }
+
+  try {
+    const stats = await importDigests(list);
+    return { ok: true, ...stats, total: await countDigests() };
+  } catch (err) {
+    return { ok: false, error: `导入失败：${err?.message || err}` };
+  }
+}
+
 // 重新分类：列出「分类体系比当前旧」的记录（只给 url / title，侧栏不需要别的）。
 //
 // 判断靠记录自身的 promptVersion，不依赖任何外部状态 ——
@@ -718,6 +760,8 @@ const HANDLERS = {
   GET_ARCHIVE_STATS: getArchiveStats,
   GET_ARCHIVE_BY_URL: getArchiveByUrl,
   SEARCH_ARCHIVE: searchArchive,
+  EXPORT_ARCHIVE: exportArchive,
+  IMPORT_ARCHIVE: importArchive,
   LIST_STALE_DIGESTS: listStaleArchive,
   RANK_BATCH: rankBatch,
   BUILD_PROFILE: buildProfileNow,

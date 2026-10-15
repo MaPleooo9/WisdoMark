@@ -129,6 +129,18 @@
           <button class="btn btn-ghost is-hidden" id="btn-archive-more" type="button">继续往下看</button>
           <p class="hint" id="archive-hint">消化过的内容都存在本地库里，这里可以按关键词和分类翻出来。</p>
 
+          <!-- 备份与迁移：数据只在本机 IndexedDB 里，换机器或重装扩展就没了。
+               导出成 JSON 带走；导入按链接去重**合并**（不是替换）——
+               同一条取消化时间更新的那份，不会把本地已更新过的记录打回旧版本。 -->
+          <div class="field-head backup-row">
+            <span class="hint" id="backup-note">导出备份，或从备份文件导入合并。</span>
+            <span class="backup-btns">
+              <button class="link-btn" id="btn-export" type="button">导出</button>
+              <button class="link-btn" id="btn-import" type="button">导入</button>
+            </span>
+          </div>
+          <input class="is-hidden" id="import-file" type="file" accept="application/json,.json" />
+
           <!-- 诊断：最近失败的消化。
                只记录「压根没拿到结果」的（连不上模型 / 连续几次输出结构不合要求）——
                模型判定「这一页没有正文主体」不算失败，那是护栏正常工作。

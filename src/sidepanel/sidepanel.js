@@ -52,6 +52,10 @@ const els = {
   archiveList: document.getElementById('archive-list'),
   archiveHint: document.getElementById('archive-hint'),
   btnArchiveMore: document.getElementById('btn-archive-more'),
+  backupNote: document.getElementById('backup-note'),
+  btnExport: document.getElementById('btn-export'),
+  btnImport: document.getElementById('btn-import'),
+  importFile: document.getElementById('import-file'),
   failuresBox: document.getElementById('failures-box'),
   failuresTitle: document.getElementById('failures-title'),
   failuresList: document.getElementById('failures-list'),
@@ -954,6 +958,123 @@ function renderArchiveStat(resp) {
   } else {
     els.archiveHint.textContent = '点标题展开摘要与要点；「打开原文」直接跳过去。按最近消化排序。';
   }
+}
+
+// ---------------------------------------------------------------------------
+// 备份与迁移（导出 / 导入）
+//
+// 归档库只在本机的 IndexedDB 里：换机器、重装扩展、清空浏览器数据都会丢。
+// 导出成 JSON 文件带走，导入时**合并**（不覆盖本地更新的记录）——
+// 合并规则与边界校验都在后台（store.js / service-worker.js），
+// 侧栏这一层只负责「读文件 / 写文件」和把结果说清楚。
+// ---------------------------------------------------------------------------
+
+// 文件太大会让 JSON.parse 卡住主线程，也可能根本不是备份文件。先挡一道。
+const MAX_IMPORT_BYTES = 32 * 1024 * 1024;
+
+function backupStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+function setBackupNote(text, kind) {
+  els.backupNote.className = kind ? `hint ${kind}` : 'hint';
+  els.backupNote.textContent = text;
+}
+
+async function handleExport() {
+  setBackupNote('正在导出…');
+
+  let resp;
+  try {
+    resp = await send('EXPORT_ARCHIVE');
+  } catch (err) {
+    resp = { ok: false, error: err?.message || String(err) };
+  }
+
+  if (!resp?.ok) {
+    setBackupNote(resp?.error || '导出失败。', 'is-fail');
+    return;
+  }
+
+  const payload = {
+    format: resp.format,
+    formatVersion: resp.formatVersion,
+    exportedAt: resp.exportedAt,
+    count: resp.count,
+    records: resp.records
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const name = `wisdomark-archive-${backupStamp()}.json`;
+
+  const a = el('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+
+  // 立刻 revoke 会把还在进行的下载掐掉，等一拍再回收
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  setBackupNote(`已导出 ${resp.count} 条 → ${name}`, 'is-ok');
+}
+
+function handleImport() {
+  // 先清空 value：不然连着选同一个文件时 change 不会再触发
+  els.importFile.value = '';
+  els.importFile.click();
+}
+
+async function handleImportFile() {
+  const file = els.importFile.files?.[0];
+  if (!file) return;
+
+  if (file.size > MAX_IMPORT_BYTES) {
+    setBackupNote(`这个文件 ${(file.size / 1048576).toFixed(1)} MB，太大，没有导入。`, 'is-fail');
+    return;
+  }
+
+  setBackupNote(`正在读 ${file.name}…`);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    setBackupNote('这个文件不是合法的 JSON，没有导入。', 'is-fail');
+    return;
+  }
+
+  // 接受两种形状：本扩展导出的信封（{ records }）或一个裸数组 ——
+  // 后者是给「自己手工整理过」的情况留的口子。
+  const records = Array.isArray(parsed) ? parsed : parsed?.records;
+  if (!Array.isArray(records) || !records.length) {
+    setBackupNote('文件里没有可导入的归档记录。', 'is-fail');
+    return;
+  }
+
+  let resp;
+  try {
+    resp = await send('IMPORT_ARCHIVE', { records });
+  } catch (err) {
+    resp = { ok: false, error: err?.message || String(err) };
+  }
+
+  if (!resp?.ok) {
+    setBackupNote(resp?.error || '导入失败。', 'is-fail');
+    return;
+  }
+
+  const parts = [`新增 ${resp.added} 条`];
+  if (resp.updated) parts.push(`更新 ${resp.updated} 条`);
+  if (resp.skipped) parts.push(`跳过 ${resp.skipped} 条（本地已有更新的）`);
+  if (resp.invalid) parts.push(`忽略 ${resp.invalid} 条（缺链接）`);
+
+  setBackupNote(`导入完成：${parts.join('，')}。库中现在 ${resp.total} 篇。`, 'is-ok');
+
+  // 立刻重查一次，让刚导进来的内容出现在列表里
+  await searchArchive();
 }
 
 // 一条 trace 压成一行：这条消化花了多久、调了几次模型、进出各多少 token。
@@ -1935,6 +2056,9 @@ async function init() {
   els.archiveKeyword.addEventListener('input', searchArchiveDebounced);
   els.archiveCategory.addEventListener('change', () => searchArchive());
   els.btnArchiveMore.addEventListener('click', () => searchArchive({ more: true }));
+  els.btnExport.addEventListener('click', handleExport);
+  els.btnImport.addEventListener('click', handleImport);
+  els.importFile.addEventListener('change', handleImportFile);
   els.btnClearFailures.addEventListener('click', handleClearFailures);
   els.btnReclassify.addEventListener('click', handleReclassify);
   els.btnRefreshFolders.addEventListener('click', handleRefreshFolders);

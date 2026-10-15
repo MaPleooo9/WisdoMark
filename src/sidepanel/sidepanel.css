@@ -785,6 +785,18 @@ body {
   font-size: 11px;
 }
 
+/* 备份与迁移：导出 / 导入两个动作挤在提示行右侧 —— 侧栏窄，
+   为它们单开一行按钮不划算（和「重新分类」同一个处理） */
+.backup-row {
+  margin-top: 10px;
+}
+
+.backup-btns {
+  display: inline-flex;
+  flex: none;
+  gap: 10px;
+}
+
 /* 模型名用等宽字体更清楚 */
 #model-list .row-title {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;

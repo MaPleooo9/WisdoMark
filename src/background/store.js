@@ -352,3 +352,140 @@ export async function clearArchive() {
   await withStore('readwrite', (s) => s.clear());
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// 备份与迁移（导出 / 导入）
+// ---------------------------------------------------------------------------
+//
+// 数据只在本机 IndexedDB 里：换机器、重装扩展、清空浏览器数据都会丢。
+// 导出一份 JSON 带走；导入时**合并**而不是替换 —— 见 importDigests 的说明。
+
+// 导入条数上限。导入文件是外部输入（可能手改过、也可能来自别的版本），
+// 上限挡的是畸形数据，不是正常使用 —— 20,000 条远超单机实际规模。
+export const MAX_IMPORT_RECORDS = 20000;
+
+// 全量读库（导出用）。与 listDigests 的取舍相反：
+// 那边是给界面翻页的，取够 limit 就停；这边要的是「一份完整副本」，所以一次走完游标。
+// 按消化时间升序，导出的文件里顺序稳定，便于人工比对。
+export async function readAllDigests() {
+  const rows = await withStore('readonly', (s) => {
+    const out = [];
+    const req = s.index('byTime').openCursor(null, 'next');
+
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) return;
+      out.push(cursor.value);
+      cursor.continue();
+    };
+
+    return out;
+  });
+
+  return rows || [];
+}
+
+// 一条导入记录 → 库里的记录形状。没有可用链接就返回 null，由调用方计数跳过。
+//
+// key 一律**重算**，不信文件里那个：去重规则会随版本演进，而且手改过的文件
+// 完全可以塞一个和 url 对不上的 key，那样会绕过去重、在库里造出重复条目。
+function normalizeImported(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+
+  const url = typeof raw.url === 'string' ? raw.url.trim() : '';
+  const key = url ? dedupeKey(url) : '';
+  if (!key) return null;
+
+  const str = (v) => (typeof v === 'string' ? v : '');
+  const num = (v) => (Number.isFinite(v) ? v : 0);
+  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
+
+  const at = num(raw.digestedAt) || Date.now();
+
+  return {
+    key,
+    url,
+    title: str(raw.title) || '(无标题)',
+    host: hostOf(url),
+    category: typeof raw.category === 'string' ? raw.category : null,
+    summary: str(raw.summary),
+    points: Array.isArray(raw.points) ? raw.points.filter((p) => typeof p === 'string' && p) : [],
+    charCount: num(raw.charCount),
+    model: str(raw.model),
+    promptVersion: str(raw.promptVersion),
+    attempts: num(raw.attempts),
+    // trace / ocr 是排查用的附加数据，形状对就带着走
+    trace: obj(raw.trace),
+    ocr: obj(raw.ocr),
+    firstDigestedAt: num(raw.firstDigestedAt) || at,
+    digestedAt: at,
+    digestCount: num(raw.digestCount) > 0 ? num(raw.digestCount) : 1
+  };
+}
+
+// 同一条链接本地已有、且导入的那份更新时：内容用导入的，但两个**累计字段**
+// 不能跟着变小 ——
+//   firstDigestedAt 取较早的（「这篇什么时候进来的」只有一个答案）
+//   digestCount 取较大的（导入不该把「读过几次」改小）
+function mergeIntoLocal(local, incoming) {
+  return {
+    ...incoming,
+    key: local.key,
+    firstDigestedAt: Math.min(
+      local.firstDigestedAt || incoming.firstDigestedAt,
+      incoming.firstDigestedAt || local.firstDigestedAt
+    ),
+    digestCount: Math.max(local.digestCount || 1, incoming.digestCount || 1)
+  };
+}
+
+// 导入：按链接去重合并。
+//
+// **为什么不直接替换**：导入的多半是「另一台机器上的旧备份」。
+// 替换会把本地已经重新消化过的记录打回旧版本 —— 用户要的是「把缺的补回来」，
+// 不是「回到备份那天」。所以规则是：
+//   本地没有       → 新增
+//   本地有、导入更新 → 覆盖内容（累计字段取更完整的）
+//   本地有、导入更旧 → 跳过（本地那份更好）
+//
+// 全程一个事务：先 getAll 建现有记录的索引，再逐条 put。
+// 既省掉逐条开事务，也不会出现「读到一半、库被改了」的中间态。
+export async function importDigests(records = []) {
+  const list = Array.isArray(records) ? records : [];
+
+  const normalized = [];
+  let invalid = 0;
+  for (const raw of list) {
+    const rec = normalizeImported(raw);
+    if (rec) normalized.push(rec);
+    else invalid += 1;
+  }
+
+  const stats = { added: 0, updated: 0, skipped: 0, invalid };
+
+  await withStore('readwrite', (s) => {
+    const req = s.getAll();
+
+    req.onsuccess = () => {
+      const existing = new Map((req.result || []).map((r) => [r.key, r]));
+
+      for (const rec of normalized) {
+        const local = existing.get(rec.key);
+
+        if (!local) {
+          s.put(rec);
+          stats.added += 1;
+        } else if (rec.digestedAt > local.digestedAt) {
+          s.put(mergeIntoLocal(local, rec));
+          stats.updated += 1;
+        } else {
+          stats.skipped += 1;
+        }
+      }
+    };
+
+    return stats;
+  });
+
+  return stats;
+}
