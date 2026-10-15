@@ -49,7 +49,7 @@
 | 0 / 1 | 骨架、抓正文、单条消化 | ✅ 完成 |
 | 2 | 完整功能（7 个子项：分类 / 落库去重 / 归档搜索 / 批量消化 / 画像 / 行动清单 / 图文帖 OCR）| ✅ 完成 |
 | 3 | **评测**（评测集 + 跑分脚本 + 指标）| ✅ **完成** —— 分类 / 护栏 / 摘要质量 / 语义级忠实度四块都有指标（忠实度 2026-10-01 闭环）；边界用例已补齐（负样本 6 条 + 2026-10-15 补的营销软文 / 图文帖 OCR / 超长内容 3 条）。**残余**：超长内容为合成探针，真实万字长文未取到（见 C 节第 12 条） |
-| 4 | 可观测性（trace）、演示图、开源材料 | ✅ **完成** —— trace / 架构图 / LICENSE / 演示图，且「照 README 跑起来」已实测验收 |
+| 4 | 可观测性（trace）、演示图、开源材料 | ✅ **完成** —— trace / 架构图 / LICENSE / 演示图，且「照 README 跑起来」已实测验收（2026-10-15 在 `0.19.0` 上重跑：38.5s、全绿、console 零错误）|
 
 **版本**：扩展 `0.19.0` / prompt `1.12.0` / 输出结构 `1.9.0`
 **规模**（截至 `0.19.0`，实测口径写明便于复算）：`src/` 13 个源文件共 5,679 行；`eval/` 6 个脚本共 2,369 行（与插件解耦）
@@ -255,7 +255,7 @@
    现已加导出 / 导入：导出把整库写成一份 JSON 备份；导入**按链接去重合并**（不替换本地更新的记录，累计字段取更完整的），
    边界校验分三层（侧栏挡文件大小 / service worker 挡条数 / store 逐条规范化）。规则与取舍见 `AGENTS.md` 第十二节。
 10. **没有追问能力**：消化出结果就结束了，不能针对某一篇继续对话。
-11. **OCR 覆盖有限**：只处理正文图片的图文帖，且质量取决于图片清晰度。
+11. **OCR 覆盖有限**：只处理正文图片的图文帖，且质量取决于图片清晰度。**验证**：链路与质量门已有可复跑脚本（`wm-ocr-test.mjs`，25/25，2026-10-15 连跑两遍不翻转）；**识别质量**仍无指标、只能人工抽查（见第四节）。
 12. **超长内容的性能只有「合成长文」的数据**：2026-10-15 补了一条 13,162 字的探针（`probe-long-truncate`，截断后 11,994 字入模），单条 **130.3 秒**（3 轮 113–133 秒，且每轮都要重试一次）—— 是全部用例里最慢的一条，比第二慢的 `agg-weekly`（88.9 秒）还慢约 40 秒，是最该盯的性能点。**但真实万字长文仍未取到**（维基百科 / GitHub 在本环境不可达；掘金 / 博客园 / CSDN 经 content-script 提取后只剩 2–3 千字），所以「真实长文」这一格仍是空的 —— 现有数字只代表「合成长文」。
 13. **单机单用户**：没有并发、没有账号体系（也不需要）。
 14. **【已修，2026-10-15 / `0.18.0`】抓取侧没裁掉评论区与「相似内容」推荐区**（2026-10-01 由忠实度复核发现，当时唯一有实测证据的内容质量缺陷）。
@@ -411,7 +411,7 @@ WisdoMark 的知识资产分两处：**仓库内**（跟着 git 走，clone 即�
 | 资产 | 路径 | 是什么 / 为什么重要 |
 |---|---|---|
 | **WisdoMark 专属技能库** ⭐ | `C:/Users/Mapleooo/.workbuddy/skills/chrome-mv3-local-llm-extension/SKILL.md` | 本项目 30+ 节实测方法论（推送配方 / MV3 硬限制 / tesseract 必抄配置 / 无头端到端验收 / OCR 质量门 / Ollama 重装 / 判 judge 的方法论 / 忠实度机械判不出的根因…）。**全项目最值钱的一份**，动手前应整篇过一遍 |
-| **仓库外验证工具** ⭐ | `C:/Users/Mapleooo/.workbuddy/tools/wisdomark/` | 无头验证 / 验收脚本（数量随开发增加，以目录实际为准）：`wm-acceptance.mjs`（全新 profile 端到端验收）、`wm-demo-gif.mjs` + `wm-gif.py`（演示 GIF，不用 ffmpeg）、`wm-judge-exp.py`（judge 原型）、`wm-backup-test.mjs` / `wm-backup-ui-test.mjs`（归档导出/导入：前者验合并语义与消息路由，后者验 UI 层 —— 真点按钮 / 真下载 / 真给 file input 塞文件）、`_harness.mjs` / `_mock-ollama.mjs`（基础设施）、`wm-*-test.mjs` / `wm-*-ui.mjs`（各功能单测）。「验证手段不进仓库」是明确取舍，所以全在本机 |
+| **仓库外验证工具** ⭐ | `C:/Users/Mapleooo/.workbuddy/tools/wisdomark/` | 无头验证 / 验收脚本（数量随开发增加，以目录实际为准）：`wm-acceptance.mjs`（全新 profile 端到端验收）、`wm-demo-gif.mjs` + `wm-gif.py`（演示 GIF，不用 ffmpeg）、`wm-judge-exp.py`（judge 原型）、`wm-backup-test.mjs` / `wm-backup-ui-test.mjs`（归档导出/导入：前者验合并语义与消息路由，后者验 UI 层 —— 真点按钮 / 真下载 / 真给 file input 塞文件）、`wm-ocr-test.mjs`（OCR 链路与质量门：在页面里现画测试图 → 识别 → 断言，不引入图片 fixture）、`_harness.mjs` / `_mock-ollama.mjs`（基础设施）、`wm-*-test.mjs` / `wm-*-ui.mjs`（各功能单测）。「验证手段不进仓库」是明确取舍，所以全在本机 |
 | 用户级长期记忆 | `C:/Users/Mapleooo/.workbuddy/user-d5380b4d-bbb0-417b-8e52-acc901052d96-personal/MEMORY.md` | 跨项目通用规则：push 按天不自动推、提交身份 `iKnowuHateme <488302730@qq.com>`、GitHub 首超先重试、本环境 git 的 refs 写入坑、npm/PATH 坑、Ollama 环境坑 |
 | 用户画像 | `C:/Users/Mapleooo/.workbuddy/user-d5380b4d-bbb0-417b-8e52-acc901052d96-personal/USER.md` | 邓瑶琦的背景、目标方向、协作偏好 |
 | 项目长期记忆 | `D:/PROJECT/WisdoMark/.workbuddy/memory/MEMORY.md` | 项目级约定与技术结论（单一来源 / 机械判别 / prompt 饱和 / 评测三条硬规矩 / 会自己过期的表述…）|

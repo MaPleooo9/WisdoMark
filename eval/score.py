@@ -428,7 +428,7 @@ def report(dataset, results, m):
     L.append('| 环节 | 为什么覆盖不到 | 在别处怎么验 |')
     L.append('|---|---|---|')
     L.append('| 抓取侧护栏（登录墙 / Cookie 墙 / 过短正文） | 评测把正文直接喂给模型，不经过 content-script | 端到端脚本 `wm-consent-test.mjs`，真实页面上 9/9（脚本在仓库外）|')
-    L.append('| 图文帖 OCR（Tesseract） | 评测喂的是已拼好的正文快照，识别质量本身没有指标 | 人工抽查；本报告不含该项 |')
+    L.append('| 图文帖 OCR（Tesseract） | 评测喂的是已拼好的正文快照，识别质量本身没有指标 | 链路与质量门：仓库外 `wm-ocr-test.mjs`；识别质量：人工抽查 |')
     L.append('| 归档去重（URL 归一化） | `store.js` 的逻辑不在这条链路上 | 开发期独立验证脚本（仓库外）|')
     L.append('| 抓取时序（等正文渲染稳定） | 评测用固定快照，生产依赖 `chrome.tabs` | 人工在真实页面上观察 |')
     L.append('| 要点完整度 / 摘要幻觉 | 本报告只算分类与护栏，不评摘要质量 | `quality.py` → `quality.md`（纯计算、不调模型：数字召回 / 数字幻觉 / 漏条目）|')
