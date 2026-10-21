@@ -260,7 +260,12 @@ async function digestAndStore(extracted) {
       title: extracted.title || '',
       url: extracted.url || '',
       charCount: extracted.charCount || 0,
-      origin: extracted.source || ''
+      origin: extracted.source || '',
+      // 正文全文（0.20.0）。归档此前只留摘要 + 要点，原文抓完就丢 ——
+      // 桌面端知识库要「搜一个词、回原文找定义句」，没有全文就没原料。
+      // 存的是**抓到的原文**而不是喂给模型前的截断版：检索需要全文。
+      // 100,000 字只是防畸形页面把库撑爆的保险，正常文章远到不了。
+      text: String(extracted.text || '').slice(0, 100000)
     },
     // 抓取侧的诊断，透传给 UI。
     // 没有它，用户看到「这一页没有可消化的正文」时无法分辨到底是
@@ -311,6 +316,8 @@ async function archiveResult(result, payload, { ms = null } = {}) {
       summary: result.value.summary,
       points: result.value.points,
       charCount: payload.source.charCount,
+      // 正文全文：知识库「搜索即建卡」的原料（见 payload.source.text 的说明）
+      text: payload.source.text || '',
       model: result.meta?.model || '',
       // 这一条是用哪版分类体系判的 —— 见 store.js 的 listStaleDigests
       promptVersion: result.meta?.promptVersion || '',
@@ -427,6 +434,8 @@ async function getLastDigest() {
 //
 // 但**列表里点开某一条时要能立刻看到摘要和要点**，所以这里把要用的字段挑出来传，
 // 不传的是 ocr / model / attempts 这些排查用的东西（那些用 GET_ARCHIVE_BY_URL 拿）。
+// text 也**刻意不传**：一篇几千字、一页几十条，列表带上全文会把消息撑爆；
+// 需要全文（知识库检索 / 建卡）时走 GET_ARCHIVE_BY_URL 单独取。
 async function searchArchive({ keyword = '', category = '', limit = 30, before = null } = {}) {
   try {
     const [{ prompt }, result, total] = await Promise.all([
@@ -474,7 +483,9 @@ async function exportArchive() {
     return {
       ok: true,
       format: 'wisdomark-archive',
-      formatVersion: 1,
+      // v2（0.20.0）：记录多带 `text` 全文。导入端**不校验**这个字段，
+      // 所以 v1 备份照样能读 —— 缺 text 的记录按「无全文」处理。
+      formatVersion: 2,
       exportedAt: new Date().toISOString(),
       count: records.length,
       records

@@ -319,6 +319,10 @@ export async function saveDigest(record = {}) {
     summary: record.summary || '',
     points: Array.isArray(record.points) ? record.points : [],
     charCount: record.charCount || 0,
+    // 正文全文（0.20.0）。此前归档只有摘要 + 要点，原文抓完就丢；
+    // 「搜索即建卡」要在全文里找定义句，所以必须留下来。
+    // 老记录读到的是 undefined —— 检索侧按「无全文」处理，不假装有。
+    text: record.text || '',
     model: record.model || '',
     // 写库时用的是哪一版分类体系。「重新分类」靠它筛出过期的记录 ——
     // 改了 prompt 并升版本号之后，老记录会自动变成「待更新」，
@@ -411,6 +415,9 @@ function normalizeImported(raw) {
     summary: str(raw.summary),
     points: Array.isArray(raw.points) ? raw.points.filter((p) => typeof p === 'string' && p) : [],
     charCount: num(raw.charCount),
+    // v1 备份没有这个字段 —— 读出来是空串，检索时按「无全文」处理。
+    // 不能因为缺字段就把整条记录判无效：备份的主要价值是摘要与要点。
+    text: str(raw.text),
     model: str(raw.model),
     promptVersion: str(raw.promptVersion),
     attempts: num(raw.attempts),
