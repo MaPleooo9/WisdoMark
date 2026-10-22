@@ -1,0 +1,15 @@
+{
+  "name": "wisdomark-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WisdoMark 桌面端 · 贴网址就消化（验证阶段）",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "verify:window": "electron verify-window.js",
+    "verify:fetch": "electron verify-fetch.js"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}
