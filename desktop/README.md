@@ -10,6 +10,8 @@
 | 复用 `content-script.js` 抓 SPA 正文 | `verify-fetch.js` | ✅ 小黑盒 924 字、5 张图、无登录墙 |
 | 复用 `digest.js` 完成消化 | `verify-digest.js` | ✅ 分类「生活常识」、摘要 + 10 条要点、一次通过 |
 | 侧栏界面原样加载 | `verify-ui.js` | ✅ 6 个 tab / 6 个 pane / Ollama 探活正常（2 个模型） |
+| 文件存储 + 知识库检索 | `verify-data.js` | ✅ 导入 4 篇 / 归档搜索 / 搜 Token 出定义段 / 建卡落库 |
+| IPC 全链路（界面 → 主进程） | `verify-ipc.js` | ✅ 6/6，用的是与 `main.js` 同一份 handler |
 
 **结论：抓取与消化可以零改动复用。** 唯一需要适配的是 `shared.js` 读配置的方式（`chrome.runtime.getURL` + `fetch`）—— 用一个 `file://` 的 shim 就够，业务代码一行没动。
 
@@ -44,10 +46,21 @@ unset ELECTRON_RUN_AS_NODE
 
 ## 还没做
 
-- **消息 handler**：界面能显示，但除了 `PING_OLLAMA`，其余消息都回「暂未接入」
-- 存储：IndexedDB 在渲染进程里可用，`store.js` 可原样跑；需要把「扩展导出的 JSON」导进来
-- 抓取：主进程要起隐藏的 `BrowserWindow` 执行 `content-script.js`（`verify-fetch.js` 已证明可行）
+- **`DIGEST_URL` 抓取**：主进程要起隐藏的 `BrowserWindow` 执行 `content-script.js`（`verify-fetch.js` 已证明可行）
+- 「当前页面 / 批量 / 画像 / 行动清单」：桌面端先不接，消息会明确回「暂未接入」
+- 归档导出 / 导入：handler 已接，但界面的文件选择框还没验
 - 打包（electron-builder，暂不做）
+
+## 存储：JSON 文件，不是 IndexedDB
+
+主进程没有 IndexedDB，所以 `desktop/store-file.js` 实现了一份**接口与 `store.js` 对齐**的文件存储：
+
+- 数据落在 `app.getPath('userData')/wisdomark/data.json`
+- `dedupeKey / conceptKey` 仍从 `src/background/store.js` 引入，不复制一份
+- 归档 / 概念卡都在同一个文件里，换机器拷一个文件即可
+
+`src/background/knowledge.js` 的 `lookup()` 增加了可选的 `records` 参数：桌面端传入文件里的记录，
+插件不传、走归档库 —— 业务逻辑没有分叉。
 
 ## 已验证的 chrome shim 边界
 

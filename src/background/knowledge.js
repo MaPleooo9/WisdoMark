@@ -67,16 +67,18 @@ function escapeRe(s) {
 // 全库检索：返回排好序的候选段。
 // 遍历 readAllDigests 而不是建倒排索引 —— 单机几百条 × 几千字，
 // 一次全遍历是几十毫秒，先不引入索引的复杂度（真慢了再说）。
-export async function lookup(term, { aliases = [], limit = MAX_TOTAL } = {}) {
+export async function lookup(term, { aliases = [], limit = MAX_TOTAL, records = null } = {}) {
   const value = String(term || '').trim();
   if (!value) return { ok: false, error: '请输入要查的词' };
 
   const terms = [...new Set([value, ...aliases.map((a) => String(a || '').trim())].filter(Boolean))];
-  const records = await readAllDigests();
+  // records 可注入：桌面端没有 IndexedDB，由调用方把文件里的记录传进来；
+  // 插件不传，走归档库。
+  const rows = records || (await readAllDigests());
 
   const candidates = [];
 
-  for (const rec of records) {
+  for (const rec of rows) {
     // 老记录没有全文 —— 跳过，不假装有（0.20.0 之前归档的记录）
     if (!rec.text) continue;
 
@@ -103,8 +105,8 @@ export async function lookup(term, { aliases = [], limit = MAX_TOTAL } = {}) {
   return {
     ok: true,
     term: value,
-    searchedDocs: records.length,
-    docsWithText: records.filter((r) => r.text).length,
+    searchedDocs: rows.length,
+    docsWithText: rows.filter((r) => r.text).length,
     candidates: candidates.slice(0, limit),
     total: candidates.length,
   };
