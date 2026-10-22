@@ -404,6 +404,20 @@ python eval/quality.py   # → eval/quality.md
 **关键文件**：`src/background/digest.js`（消化链路与校验）、`shared/prompt.json`（prompt 与判据）、
 `src/background/store.js`（归档库）、`eval/`（评测：`report.md` 管分类与护栏、`quality.md` 管摘要质量）。
 
+### 面试演示：3 分钟路径（不依赖现场抓网页）
+
+现场抓网页有风险（站点限流 / 改版 / 要登录）。`assets/demo-archive.json` 预置了 **4 篇带正文全文**的归档
+（技术学习 / 工具与产品 / 生活常识；摘要与要点是 `eval/results.json` 里的真实模型输出），导入即可演示。
+
+1. 侧栏「归档」→「导入」→ 选 `assets/demo-archive.json`
+2. 切「知识库」→ 搜 `Token` → 回车
+3. 候选第一条通常是 `Token中文名词元，可以看作是AI工作量的计量单位。`
+4. 点它的「建卡」→ 约 10 秒 → 下方出现卡片（改写 + 原文 + 出处）
+5. 再搜 `剪贴板管理器`，可演示「跨文章命中」
+
+> 建卡要调一次本地模型。演示机必须开着 Ollama，并已设 `OLLAMA_ORIGINS=chrome-extension://*`。
+> 演示数据包由仓库外的 `wm-demo-archive.mjs` 生成，改评测结果后可重新生成。
+
 ---
 
 ## 九、交接资产位置总表（仓库外的东西都在哪）
