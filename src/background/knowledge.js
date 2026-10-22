@@ -38,17 +38,21 @@ export function scoreParagraph(para, terms) {
 
   let score = 0;
 
-  // X 在段首 40 字内：「X 是一种…」这类典型定义
-  if (para.indexOf(hit) <= 40) score += 5;
+  // X 在段首附近：「X 是一种…」这类典型定义。
+  // 实测门槛从 40 收到 10：术语堆砌句（「…Agent，上下文1M，Token成本大降…」）
+  // 里 X 出现在中段，会被误排到真定义前面。
+  if (para.indexOf(hit) <= 10) score += 5;
 
-  // 段内出现「X 是 / X 指 / X 称为 / X 叫做 / X 可以看作」
+  // 段内出现「X 是 / X 指 / X 称为 / X 叫做 / X 可以看作 / X 中文名」
   const defRe = new RegExp(
-    `${escapeRe(hit)}\\s*(是|指|称为|叫做|可以看作|指的是|是一种|即|就是)`
+    `${escapeRe(hit)}\\s*(是|指|称为|叫做|可以看作|指的是|是一种|即|就是|中文名)`
   );
   if (defRe.test(para)) score += 10;
 
-  // 长度像定义段（40~300 字）：太短像碎片，太长像整节论述
-  if (para.length >= 40 && para.length <= 300) score += 3;
+  // 长度像定义段（20~300 字）：太短像碎片，太长像整节论述。
+  // 下限从 40 放到 20 —— 「Token 中文名词元，可以看作是 AI 工作量的计量单位」只有 30 来字，
+  // 之前被当成碎片、反而排不过长句。
+  if (para.length >= 20 && para.length <= 300) score += 3;
 
   // 同一段里出现两次以上，说明这段确实在围绕它讲
   if (para.split(hit).length - 1 >= 2) score += 2;
