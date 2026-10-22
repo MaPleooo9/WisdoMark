@@ -9,6 +9,7 @@
 | Electron 能创建窗口 | `verify-window.js` | ✅ 通过 |
 | 复用 `content-script.js` 抓 SPA 正文 | `verify-fetch.js` | ✅ 小黑盒 924 字、5 张图、无登录墙 |
 | 复用 `digest.js` 完成消化 | `verify-digest.js` | ✅ 分类「生活常识」、摘要 + 10 条要点、一次通过 |
+| 侧栏界面原样加载 | `verify-ui.js` | ✅ 6 个 tab / 6 个 pane / Ollama 探活正常（2 个模型） |
 
 **结论：抓取与消化可以零改动复用。** 唯一需要适配的是 `shared.js` 读配置的方式（`chrome.runtime.getURL` + `fetch`）—— 用一个 `file://` 的 shim 就够，业务代码一行没动。
 
@@ -43,8 +44,15 @@ unset ELECTRON_RUN_AS_NODE
 
 ## 还没做
 
-- 界面：复用 `src/sidepanel/`，替换 `chrome.*` 调用
-- 存储：IndexedDB → 本地文件 / SQLite
-- 「贴网址 → 抓取 → 消化 → 入库」的完整编排
-- 归档导入（复用 `assets/demo-archive.json`）
+- **消息 handler**：界面能显示，但除了 `PING_OLLAMA`，其余消息都回「暂未接入」
+- 存储：IndexedDB 在渲染进程里可用，`store.js` 可原样跑；需要把「扩展导出的 JSON」导进来
+- 抓取：主进程要起隐藏的 `BrowserWindow` 执行 `content-script.js`（`verify-fetch.js` 已证明可行）
 - 打包（electron-builder，暂不做）
+
+## 已验证的 chrome shim 边界
+
+界面侧只需要 7 个 API（`runtime.sendMessage / lastError / getManifest / getURL`、`storage.local`、`tabs.onActivated / onUpdated`）。
+`preload.js` 全部顶住了；`tabs` 的监听是空实现，桌面端没有标签页事件。
+
+> `sandbox: false` 是必须的 —— Electron 默认的 sandbox 会限制 preload 里的 `require`，
+> 实测报 `module not found: node:path`，随后 `window.chrome` 根本没注入，界面初始化中断。
