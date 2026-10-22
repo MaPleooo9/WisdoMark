@@ -158,6 +158,8 @@ body {
 
 .tabs {
   display: flex;
+  /* 6 个 tab 时平均分会把 4 字的「粘贴链接」压得太窄，放不下就换行 */
+  flex-wrap: wrap;
   gap: 2px;
   padding: 3px;
   margin-bottom: 12px;
@@ -166,7 +168,9 @@ body {
 }
 
 .tab {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 52px;
+  white-space: nowrap;
   padding: 6px 4px;
   border: none;
   border-radius: 6px;
