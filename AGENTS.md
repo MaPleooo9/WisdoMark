@@ -1646,4 +1646,4 @@ judge 也会判「支持」（那一句确实在它读到的文本里）。
 
 key 用 `conceptKey()` 归一化（NFKC + 小写 + 去空白），**不做语义合并** ——「RAG 和检索增强生成是不是同一个」交给用户加别名。
 
-**验证** `wm-knowledge-test.mjs` **18/18**（切段 / 打分 / 跨文章 / 老记录无全文跳过 / 别名检索 / 锚点 / 概念卡 CRUD / 一次真实改写）。回归：`wm-backup-test` 25/25、`wm-archive-test` 37/37（DB v2 → v3 升级没破坏归档）。
+**验证** `wm-knowledge-test.mjs` **18/18**（切段 / 打分 / 跨文章 / 老记录无全文跳过 / 别名检索 / 锚点 / 概念卡 CRUD / 一次真实改写）。UI 层 `wm-knowledge-ui-test.mjs` **9/9**（切面板 / 搜索 / 候选排序 / 点「建卡」真实调模型 / 卡片落库 / 删除）。回归：`wm-backup-test` 25/25、`wm-archive-test` 37/37（DB v2 → v3 升级没破坏归档）。
