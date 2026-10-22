@@ -1681,3 +1681,25 @@ if (!recognized?.ok || !recognized.text) {
 - `wm-ocr-fallback-test.mjs` **5/5**：本地页面 924 字 + 2 张 404 图 → OCR 失败 → 回退 → 摘要 278 字、落库
 
 > **测试设计上的一个坑**：反向场景（开场白）放不进端到端 —— 404 图的尺寸是 0，会被 `collectImages` 过滤，OCR 根本不触发，测到的是既有行为而不是回退判据。所以反向必须用纯函数单测，别把它塞进 UI 流程里假装测到了。
+
+---
+
+## 十六、桌面端可行性：抓取与消化可以零改动复用（2026-10-22）
+
+第 7 步先做的是**可行性验证**，不是搭应用 —— 三条都过才值得投入。
+
+| 验证 | 脚本 | 结果 |
+|---|---|---|
+| 起窗口 | `desktop/verify-window.js` | ✅ |
+| 复用 `content-script.js` 抓 SPA | `desktop/verify-fetch.js` | ✅ 小黑盒 924 字 / 5 图 / 无登录墙 |
+| 复用 `digest.js` 消化 | `desktop/verify-digest.js` | ✅ 分类「生活常识」+ 10 条要点，一次通过 |
+
+结论：**业务代码零改动**。唯一适配是 `shared.js` 用 `chrome.runtime.getURL` + `fetch` 读两个 JSON —— 在 Electron 主进程里 shim 一个 `file://` 版本的 `chrome.runtime` 与 `fetch` 即可。
+
+三个环境坑（详细版在 `desktop/README.md`）：
+
+1. `ELECTRON_RUN_AS_NODE=1` 被预设 → `require('electron')` 返回路径字符串 → 必须 unset
+2. GPU 进程在沙箱里崩 → `--no-sandbox --disable-gpu --disable-gpu-sandbox --in-process-gpu`
+3. `executeJavaScript` 注入含函数的完成值 → `An object could not be cloned` → 末尾补 `;0`
+
+**没验的**：窗口真实显示（全程 `show:false`）、打包、存储层替换（IndexedDB → 文件/SQLite）、多标签页并发抓取。
