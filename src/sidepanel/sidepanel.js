@@ -5,6 +5,7 @@
 
 import { recognizeImages, mergeWithDocument } from './ocr.js';
 import { runBatchDigest, BATCH_DEFAULT } from './batch.js';
+import { looksLikeCompleteArticle } from '../background/text.js';
 
 const els = {
   // 消息 / 状态
@@ -373,18 +374,47 @@ async function digestWithOcr(ocr, { onProgress, quiet } = {}) {
     recognized = { ok: false, error: err?.message || String(err) };
   }
 
-  // 一张都没认出可用文字：如实说「没抓到正文」，不要硬着头皮把 1118 字开场白送去总结 ——
-  // 那正是用户抱怨「这个网站就不太行」的样子：有结果，但全是废话。
+  // 一张都没认出可用文字。
+  //
+  // ⚠️ 不能无条件判「没抓到正文」—— 2026-10-22 实测踩到：
+  // 小黑盒《吃烫的就流鼻涕》正文 924 字、排版完整（讲清了原理 / 对比 / 误区 / 办法），
+  // 只是 5 张配图里没有可用文字，整篇就被判死。它的正文早过了 MIN_CONTENT_CHARS（400）。
+  //
+  // 分两档：
+  //   正文像完整文章 → 回退成普通消化，并在 ocr 里标明「图片没认出」，用户能知情；
+  //   正文只是开场白 → 仍按原逻辑判「没抓到正文」（避免有结果但全是废话）。
   if (!recognized?.ok || !recognized.text) {
+    const baseText = String(ocr?.text || '');
+    const minChars = ocr?.minChars || 400;
+
+    if (looksLikeCompleteArticle(baseText)) {
+      setRunLabel('图片里没认出文字，按正文消化');
+      return send('DIGEST_TEXT', {
+        text: baseText,
+        title: ocr?.title,
+        url: ocr?.url,
+        source: ocr?.source,
+        quiet: !!quiet,
+        ocr: {
+          used: false,
+          failed: true,
+          minChars,
+          total: images.length,
+          imageTotal: ocr?.imageTotal || images.length,
+          recognized: 0
+        }
+      }).catch((err) => ({ ok: false, error: err.message }));
+    }
+
     return {
       ok: true,
       value: {
         ok: false,
         reason:
           recognized?.error ||
-          `正文只有 ${ocr?.text?.length || 0} 字，${images.length} 张图片也没能识别出可用文字`
+          `正文只有 ${baseText.length} 字，${images.length} 张图片也没能识别出可用文字`
       },
-      source: { title: ocr?.title, url: ocr?.url, charCount: ocr?.text?.length || 0 },
+      source: { title: ocr?.title, url: ocr?.url, charCount: baseText.length },
       extract: {
         lowContent: true,
         foregroundFallback: !!ocr?.foregroundFallback,
