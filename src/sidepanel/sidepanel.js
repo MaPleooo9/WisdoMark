@@ -22,7 +22,8 @@ const els = {
     bookmarks: document.getElementById('pane-bookmarks'),
     current: document.getElementById('pane-current'),
     batch: document.getElementById('pane-batch'),
-    archive: document.getElementById('pane-archive')
+    archive: document.getElementById('pane-archive'),
+    knowledge: document.getElementById('pane-knowledge')
   },
   urlInput: document.getElementById('url-input'),
   btnDigestUrl: document.getElementById('btn-digest-url'),
@@ -65,6 +66,14 @@ const els = {
   reclassifyBox: document.getElementById('reclassify-box'),
   reclassifyHint: document.getElementById('reclassify-hint'),
   btnReclassify: document.getElementById('btn-reclassify'),
+
+  // 知识库（0.21.0）：搜索即建卡
+  kbKeyword: document.getElementById('kb-keyword'),
+  btnKbSearch: document.getElementById('btn-kb-search'),
+  kbHint: document.getElementById('kb-hint'),
+  kbCandidates: document.getElementById('kb-candidates'),
+  kbCards: document.getElementById('kb-cards'),
+  kbCardCount: document.getElementById('kb-card-count'),
 
   // 我的画像
   profileNote: document.getElementById('profile-note'),
@@ -219,6 +228,11 @@ function switchPane(name) {
     refreshStaleState();
     // 以及最近有没有消化失败过（阶段 4 的诊断区）
     loadFailures();
+  }
+
+  // 知识库：每次切进来刷新已建的卡 —— 建完卡不用手动刷
+  if (name === 'knowledge') {
+    loadConcepts();
   }
 }
 
@@ -2013,6 +2027,164 @@ async function restoreLastDigest(open) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 知识库（0.21.0）：搜索即建卡
+// ---------------------------------------------------------------------------
+//
+// 流程：搜词 → 归档正文里找候选段（后端打分排序）→ 用户点「建卡」
+//      → 只对选中的那段改写 → 锚点校验 → 落库 → 刷新卡片列表。
+// 「哪段在解释它」不靠模型判（实测只有 50%），候选段全部展开给人看。
+
+let kbLastTerm = '';
+
+async function handleKbSearch() {
+  const term = els.kbKeyword.value.trim();
+  if (!term) {
+    els.kbHint.textContent = '先输入一个词。';
+    return;
+  }
+
+  kbLastTerm = term;
+  els.kbHint.textContent = '正在归档里检索…';
+  els.kbCandidates.innerHTML = '';
+
+  const resp = await send('LOOKUP_TERM', { term });
+  if (!resp?.ok) {
+    els.kbHint.textContent = resp?.error || '检索失败';
+    return;
+  }
+
+  renderKbCandidates(resp);
+}
+
+function renderKbCandidates(resp) {
+  els.kbCandidates.innerHTML = '';
+
+  if (!resp.candidates?.length) {
+    els.kbHint.textContent = resp.docsWithText
+      ? `没找到解释「${resp.term}」的段落。换个说法，或先把相关文章消化进来。`
+      : '归档里还没有正文全文（0.20.0 之前的记录）。重新消化一篇后就有了。';
+    return;
+  }
+
+  els.kbHint.textContent = `在 ${resp.docsWithText} 篇带全文的文章里找到 ${resp.total} 段，按「像不像定义」排序：`;
+
+  for (const c of resp.candidates) {
+    const li = document.createElement('li');
+    li.className = 'row-item kb-candidate';
+
+    const head = document.createElement('div');
+    head.className = 'kb-candidate-head';
+
+    const title = document.createElement('span');
+    title.className = 'kb-candidate-title';
+    title.textContent = c.title;
+
+    const build = document.createElement('button');
+    build.className = 'link-btn';
+    build.type = 'button';
+    build.textContent = '建卡';
+    build.addEventListener('click', () => handleBuildKbCard(c, build));
+
+    head.append(title, build);
+
+    const text = document.createElement('p');
+    text.className = 'kb-candidate-text';
+    text.textContent = c.text;
+
+    const meta = document.createElement('p');
+    meta.className = 'hint';
+    meta.textContent = `第 ${c.paragraphIndex} 段 · 相关度 ${c.score}`;
+
+    li.append(head, text, meta);
+    els.kbCandidates.append(li);
+  }
+}
+
+async function handleBuildKbCard(candidate, button) {
+  const term = kbLastTerm;
+  if (!term) return;
+
+  button.disabled = true;
+  button.textContent = '建卡中…';
+
+  const resp = await send('BUILD_CARD', { term, candidate });
+  if (!resp?.ok) {
+    button.disabled = false;
+    button.textContent = '建卡';
+    els.kbHint.textContent = resp?.error || '建卡失败';
+    return;
+  }
+
+  button.textContent = '已建卡';
+  els.kbHint.textContent = resp.rewriteRejected
+    ? '已建卡（改写没通过核对，卡片上只放原句）。'
+    : '已建卡。';
+
+  await loadConcepts();
+}
+
+async function loadConcepts() {
+  const resp = await send('LIST_CONCEPTS');
+  if (!resp?.ok) {
+    els.kbCardCount.textContent = resp?.error || '读取失败';
+    return;
+  }
+  renderConcepts(resp.cards || []);
+}
+
+function renderConcepts(cards) {
+  els.kbCards.innerHTML = '';
+  els.kbCardCount.textContent = cards.length ? `共 ${cards.length} 张` : '还没有';
+
+  if (!cards.length) {
+    const li = document.createElement('li');
+    li.className = 'hint';
+    li.textContent = '搜一个词、点「建卡」，卡片会出现在这里。';
+    els.kbCards.append(li);
+    return;
+  }
+
+  for (const card of cards) {
+    const li = document.createElement('li');
+    li.className = 'row-item kb-card';
+
+    const head = document.createElement('div');
+    head.className = 'kb-card-head';
+
+    const term = document.createElement('span');
+    term.className = 'kb-card-term';
+    term.textContent = card.term;
+
+    const del = document.createElement('button');
+    del.className = 'link-btn';
+    del.type = 'button';
+    del.textContent = '删除';
+    del.addEventListener('click', async () => {
+      del.disabled = true;
+      await send('DELETE_CONCEPT', { key: card.key });
+      await loadConcepts();
+    });
+
+    head.append(term, del);
+
+    const body = document.createElement('p');
+    body.className = 'kb-card-text';
+    body.textContent = card.rewrite || card.quote;
+
+    const quote = document.createElement('p');
+    quote.className = 'hint kb-card-quote';
+    quote.textContent = (card.rewrite ? '原文：' : '') + card.quote;
+
+    const src = document.createElement('p');
+    src.className = 'hint';
+    src.textContent = card.source?.title ? `来自：${card.source.title}` : '';
+
+    li.append(head, body, quote, src);
+    els.kbCards.append(li);
+  }
+}
+
 async function init() {
   // 页脚显示扩展版本（原先这里写死「阶段 N」，阶段一推进就过期了）。
   // 用处是实际的：改了代码要重新加载扩展，版本号变了才能确认加载的是新版。
@@ -2079,6 +2251,12 @@ async function init() {
   els.btnRecheck.addEventListener('click', checkOllama);
   els.btnBuildProfile.addEventListener('click', handleBuildProfile);
   els.btnBuildActions.addEventListener('click', handleBuildActions);
+
+  // 知识库：点按钮或回车都能搜
+  els.btnKbSearch.addEventListener('click', handleKbSearch);
+  els.kbKeyword.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleKbSearch();
+  });
 
   // 切标签页 / 页面跳转时同步当前页信息
   chrome.tabs.onActivated.addListener(refreshActiveTab);

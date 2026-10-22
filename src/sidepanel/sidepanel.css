@@ -1042,3 +1042,38 @@ body {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------------------------
+   知识库（0.21.0）：搜索即建卡
+   --------------------------------------------------------------------------- */
+
+.kb-candidate-head,
+.kb-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kb-candidate-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.kb-candidate-text,
+.kb-card-text {
+  margin: 6px 0 4px;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.kb-card-term {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.kb-card-quote {
+  margin-top: 2px;
+}

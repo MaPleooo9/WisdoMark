@@ -16,8 +16,10 @@ import { getActiveTab, extractActivePage, extractFromUrl } from './page.js';
 import { digestDocument, rankBatch, buildProfile, buildActionPlan } from './digest.js';
 import {
   saveDigest, countDigests, listDigests, getDigest, searchDigests, listStaleDigests,
-  readAllDigests, importDigests, MAX_IMPORT_RECORDS
+  readAllDigests, importDigests, MAX_IMPORT_RECORDS,
+  saveConcept, listConcepts, deleteConcept
 } from './store.js';
+import { lookup as lookupKnowledge, buildCard } from './knowledge.js';
 import { loadShared } from './shared.js';
 import { buildTrace, recordFailure, listFailures, clearFailures } from './trace.js';
 
@@ -754,6 +756,65 @@ async function refreshOllamaStatus() {
 }
 
 // ---------------------------------------------------------------------------
+// 知识库（0.21.0）：搜索即建卡
+// ---------------------------------------------------------------------------
+//
+// 与「消化」不同，这里不碰抓取与模型分类：只查已经归档的正文。
+// 三层设计见 knowledge.js —— 检索 / 打分排序 / 用户点选 / 改写 + 锚点校验。
+
+async function lookupTerm({ term = '', aliases = [] } = {}) {
+  try {
+    return await lookupKnowledge(term, { aliases });
+  } catch (err) {
+    return { ok: false, error: `检索失败：${err?.message || err}` };
+  }
+}
+
+// 用户点了「建卡」：只对**选中的那一段**改写，然后落库。
+// 改写没通过锚点校验时 buildCard 会返回空 rewrite —— 照样存，
+// 卡片上只显示原句（原文本身就是最可信的解释）。
+async function buildAndSaveCard({ term = '', aliases = [], candidate = null } = {}) {
+  try {
+    if (!candidate?.text) return { ok: false, error: '没有选中的原文段落' };
+
+    const { prompt } = await loadShared();
+    const card = await buildCard({ term, aliases, candidate, modelCfg: prompt.model });
+
+    if (!card.ok) return card;
+
+    const saved = await saveConcept({
+      term: card.term,
+      aliases: card.aliases,
+      rewrite: card.rewrite,
+      quote: card.quote,
+      source: card.source,
+      model: prompt.model?.name || '',
+      confirmed: true
+    });
+
+    return { ...card, saved };
+  } catch (err) {
+    return { ok: false, error: `建卡失败：${err?.message || err}` };
+  }
+}
+
+async function listConceptCards() {
+  try {
+    return { ok: true, cards: await listConcepts() };
+  } catch (err) {
+    return { ok: false, error: `读概念卡失败：${err?.message || err}` };
+  }
+}
+
+async function removeConcept({ key = '' } = {}) {
+  try {
+    return await deleteConcept(key);
+  } catch (err) {
+    return { ok: false, error: `删除失败：${err?.message || err}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 消息路由（侧栏 → 后台）
 // ---------------------------------------------------------------------------
 
@@ -781,7 +842,12 @@ const HANDLERS = {
   GET_ACTIONS: getActionPlan,
   // 阶段 4：诊断日志
   GET_FAILURES: getFailures,
-  CLEAR_FAILURES: dropFailures
+  CLEAR_FAILURES: dropFailures,
+  // 知识库（0.21.0）：搜索即建卡
+  LOOKUP_TERM: lookupTerm,
+  BUILD_CARD: buildAndSaveCard,
+  LIST_CONCEPTS: listConceptCards,
+  DELETE_CONCEPT: removeConcept
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

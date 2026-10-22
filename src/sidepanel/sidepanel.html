@@ -30,6 +30,7 @@
           <button class="tab" type="button" data-pane="current">当前页面</button>
           <button class="tab" type="button" data-pane="batch">批量</button>
           <button class="tab" type="button" data-pane="archive">归档</button>
+          <button class="tab" type="button" data-pane="knowledge">知识库</button>
         </div>
 
         <div class="pane" id="pane-paste">
@@ -153,6 +154,29 @@
             <p class="hint" id="failures-note">—</p>
             <button class="link-btn" id="btn-clear-failures" type="button">清空记录</button>
           </details>
+        </div>
+
+        <!-- 知识库：搜索即建卡（0.21.0）
+             不预建概念库 —— 只在用户真的搜一个词时，才去归档正文里找解释它的段落。
+             模型负责检索 / 摘句 / 改写；「哪段在解释它」由用户点选（实测模型判定只有 50%）。 -->
+        <div class="pane is-hidden" id="pane-knowledge">
+          <input
+            class="input"
+            id="kb-keyword"
+            type="search"
+            placeholder="搜一个词，找回看过的解释，例如：Token / 剪贴板管理器"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="btn" id="btn-kb-search" type="button">搜索</button>
+          <p class="hint" id="kb-hint">在归档正文里找解释这个词的段落。点「建卡」才会存下来 —— 判定不交给模型，由你选。</p>
+          <ul class="row-list" id="kb-candidates"></ul>
+
+          <div class="field-head">
+            <span class="field-label">已建的概念卡</span>
+            <span class="hint" id="kb-card-count">—</span>
+          </div>
+          <ul class="row-list" id="kb-cards"></ul>
         </div>
 
         <p class="hint run-status is-hidden" id="run-status"></p>
