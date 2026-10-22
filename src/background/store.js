@@ -17,8 +17,10 @@
 
 const DB_NAME = 'wisdomark';
 // v2：加了 byTime 复合索引（分页续读要用，见 searchDigests 的说明）
-const DB_VERSION = 2;
+// v3：加 concepts 对象仓库（桌面端知识库的概念卡；与归档同库，便于按文章回查）
+const DB_VERSION = 3;
 const STORE = 'digests';
+const CONCEPTS = 'concepts';
 
 // 纯来源标记的参数，删掉不影响内容本身。
 // 取舍偏保守：**宁可多列几个已知的跟踪参数，也不要因为一个参数不同就把
@@ -118,6 +120,15 @@ function openDb() {
       // 排在后面的记录会被整个跳过（实测 35 条只翻出 34 条）。
       // 加上主键之后每条记录的键都唯一，游标就有了全序，不重不漏。
       if (!store.indexNames.contains('byTime')) store.createIndex('byTime', ['digestedAt', 'key']);
+
+      // v3：概念卡仓库。key 是归一化后的 term（同一个词只留一张卡）。
+      // 与 digests 分仓库而不是塞进归档记录 —— 一张卡可以引用多篇文章，
+      // 塞进任意一篇都会让「这张卡属于谁」变得含糊。
+      if (!db.objectStoreNames.contains(CONCEPTS)) {
+        const concepts = db.createObjectStore(CONCEPTS, { keyPath: 'key' });
+        concepts.createIndex('updatedAt', 'updatedAt');
+        concepts.createIndex('term', 'term');
+      }
     };
 
     // 升级被别的连接挡住时（比如另一个窗口开着旧版侧栏）会一直等下去。
@@ -153,15 +164,15 @@ function openDb() {
 // 把「开事务 → 跑操作 → 等事务真正提交」包成一次 Promise。
 // 注意等的是 t.oncomplete 而不是 request.onsuccess —— 后者只说明这条记录
 // 写进了事务，事务仍可能回滚。
-function withStore(mode, work) {
+function withStoreNamed(name, mode, work) {
   return openDb().then(
     (db) =>
       new Promise((resolve, reject) => {
-        const t = db.transaction(STORE, mode);
+        const t = db.transaction(name, mode);
         let out;
 
         try {
-          out = work(t.objectStore(STORE));
+          out = work(t.objectStore(name));
         } catch (err) {
           try {
             t.abort();
@@ -180,6 +191,11 @@ function withStore(mode, work) {
         t.onabort = () => reject(t.error);
       })
   );
+}
+
+// digests 的常用别名 —— 绝大多数调用只碰归档库
+function withStore(mode, work) {
+  return withStoreNamed(STORE, mode, work);
 }
 
 // ---------------------------------------------------------------------------
@@ -495,4 +511,92 @@ export async function importDigests(records = []) {
   });
 
   return stats;
+}
+
+// ---------------------------------------------------------------------------
+// 概念卡（v3 / 0.21.0）
+// ---------------------------------------------------------------------------
+//
+// 「搜索即建卡」的产物：用户搜一个词 → 从归档全文里找到解释它的段落 →
+// 用户确认 → 存一张卡。卡是**缓存**，不是前提 —— 没搜过的词不会建卡。
+//
+// key 用归一化后的 term：同一个词只留一张卡；别名放在 aliases 里参与检索。
+// 归一化只做全半角 / 大小写 / 空白，**不做语义合并** ——「RAG 和检索增强生成
+// 是不是同一个东西」交给用户判断（卡片里可以手动加别名）。
+
+export function conceptKey(term) {
+  return String(term || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function normalizeConcept(card = {}) {
+  const key = conceptKey(card.term);
+  if (!key) return null;
+
+  const str = (v) => (typeof v === 'string' ? v : '');
+  return {
+    key,
+    term: String(card.term || '').trim(),
+    aliases: Array.isArray(card.aliases)
+      ? card.aliases.map((a) => String(a || '').trim()).filter(Boolean).slice(0, 12)
+      : [],
+    rewrite: str(card.rewrite).slice(0, 2000),
+    quote: str(card.quote).slice(0, 4000),
+    source: card.source && typeof card.source === 'object' ? card.source : null,
+    model: str(card.model),
+    confirmed: card.confirmed === true,
+    createdAt: 0,
+    updatedAt: 0
+  };
+}
+
+export async function saveConcept(card = {}) {
+  const base = normalizeConcept(card);
+  if (!base) return { ok: false, error: '缺少概念名' };
+
+  const prev = await getConcept(base.key);
+  const now = Date.now();
+  const next = { ...base, createdAt: prev?.createdAt || now, updatedAt: now };
+
+  await withStoreNamed(CONCEPTS, 'readwrite', (s) => s.put(next));
+  return { ok: true, isNew: !prev, key: base.key };
+}
+
+export async function getConcept(key) {
+  const k = conceptKey(key);
+  if (!k) return null;
+  return (await withStoreNamed(CONCEPTS, 'readonly', (s) => s.get(k))) || null;
+}
+
+export async function listConcepts({ limit = 200 } = {}) {
+  const rows = await withStoreNamed(CONCEPTS, 'readonly', (s) => {
+    const out = [];
+    const req = s.index('updatedAt').openCursor(null, 'prev');
+
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor || out.length >= limit) return;
+      out.push(cursor.value);
+      cursor.continue();
+    };
+
+    return out;
+  });
+
+  return rows || [];
+}
+
+export async function deleteConcept(key) {
+  const k = conceptKey(key);
+  if (!k) return { ok: false, error: '缺少概念名' };
+  await withStoreNamed(CONCEPTS, 'readwrite', (s) => s.delete(k));
+  return { ok: true, key: k };
+}
+
+export async function clearConcepts() {
+  await withStoreNamed(CONCEPTS, 'readwrite', (s) => s.clear());
+  return { ok: true };
 }
