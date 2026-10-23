@@ -1702,4 +1702,9 @@ if (!recognized?.ok || !recognized.text) {
 2. GPU 进程在沙箱里崩 → `--no-sandbox --disable-gpu --disable-gpu-sandbox --in-process-gpu`
 3. `executeJavaScript` 注入含函数的完成值 → `An object could not be cloned` → 末尾补 `;0`
 
-**没验的**：窗口真实显示（全程 `show:false`）、打包、存储层替换（IndexedDB → 文件/SQLite）、多标签页并发抓取。
+**没验的**：窗口真实显示（全程 `show:false`）、打包、多标签页并发抓取。
+
+**同日后续进展**：界面已加载（6 tab / 6 pane）、消息 handler 已接（`desktop/handlers.js` 单一来源）、存储换成 JSON 文件（`desktop/store-file.js`）、**贴网址消化闭环**（抓 924 字 → 生活常识 + 10 要点 → 落库，26.8s）。
+
+- 现在能：贴网址 → 摘要 → 归档 → 知识库
+- 还缺：当前页 / 批量 / 画像 / 行动清单（明确回「暂未接入」）、OCR、归档文件选择框、打包
