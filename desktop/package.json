@@ -13,7 +13,7 @@
     "verify:data": "electron verify-data.js",
     "verify:ipc": "electron verify-ipc.js",
     "verify:digest-url": "electron verify-digest-url.js",
-    "dist": "electron-builder --win --publish never"
+    "dist": "node scripts/clean.js out && electron-builder --win --publish never && node scripts/deploy.js"
   },
   "devDependencies": {
     "electron": "^45.0.0",

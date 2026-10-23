@@ -74,6 +74,17 @@ git ls-remote --heads gitee main   # 两行哈希应与 git rev-parse HEAD 相�
 
 ---
 
+### 打包产物：固定目录，不累积
+
+桌面端打包一次约 450 MB。这个环境里**大目录删不掉**（`rm -rf` 被转成「移到回收站」，
+几百 MB 超出回收站容量 → trash-failed，重启也没用），所以：
+
+- `electron-builder` 的输出**固定为 `desktop/out/`**，不产生 `dist2`/`dist3`
+- `npm run dist` 的完整链路：`clean.js out`（逐文件删）→ 打包 → `deploy.js`（复制到 `desktop/app/`）
+- `desktop/app/` 是可直接运行的目录（含官方签名的 `electron.exe`，绕过 SAC），已在 `.gitignore`
+- **不要用 `fs.cpSync` 覆盖 `app.asar`**：它先 unlink 再写，而 IDE 的文件索引持有读句柄，会 EPIPE；
+  用 `copyFileSync` 直接写内容
+
 ### 新增 `chrome.*` API 时必须同步 manifest 权限
 
 实测踩过（2026-09-13）：`getRecentBookmarks()` 调用 `chrome.bookmarks.getRecent`，

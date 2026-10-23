@@ -3,7 +3,10 @@ productName: WisdoMark
 copyright: Copyright © 2026 邓瑶琦
 
 directories:
-  output: dist
+  # 固定输出到 out/，配合 scripts/deploy.js 复制到 app/
+  # 不用 dist2/dist3 这类新目录 —— 这个环境里几百 MB 的目录删不掉（回收站装不下），
+  # 每次新开一个目录会越积越多。
+  output: out
   buildResources: build
 
 # 桌面端自己的代码进 asar

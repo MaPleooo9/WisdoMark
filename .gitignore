@@ -20,6 +20,8 @@ build/
 desktop/dist*/
 # 打包后可直接运行的目录（Electron 运行时 + app.asar），700 MB，不进仓库
 desktop/app/
+# electron-builder 的固定输出目录（`npm run dist` 会自动清空它）
+desktop/out/
 
 # 系统 / 编辑器
 .DS_Store
