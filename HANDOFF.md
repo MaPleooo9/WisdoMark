@@ -50,6 +50,7 @@
 | 2 | 完整功能（7 个子项：分类 / 落库去重 / 归档搜索 / 批量消化 / 画像 / 行动清单 / 图文帖 OCR）| ✅ 完成 |
 | 3 | **评测**（评测集 + 跑分脚本 + 指标）| ✅ **完成** —— 分类 / 护栏 / 摘要质量 / 语义级忠实度四块都有指标（忠实度 2026-10-01 闭环）；边界用例已补齐（负样本 6 条 + 2026-10-15 补的营销软文 / 图文帖 OCR / 超长内容 3 条）。**残余**：超长内容为合成探针，真实万字长文未取到（见 C 节第 12 条） |
 | 4 | 可观测性（trace）、演示图、开源材料 | ✅ **完成** —— trace / 架构图 / LICENSE / 演示图，且「照 README 跑起来」已实测验收（2026-10-15 在 `0.19.0` 上重跑：38.5s、全绿、console 零错误）|
+| 5 | **桌面端（Electron）** | ✅ **闭环**（2026-10-23）—— 贴网址 → 摘要 → 归档 → 知识库全通，界面 6 个入口原样复用；打包出 portable exe（104 MB）。**本机 SAC 拦未签名 exe**，暂用官方 `electron.exe` 方案（见第十一节）|
 
 **版本**：扩展 `0.22.2` / prompt `1.12.0` / 输出结构 `1.9.0`
 （`0.20.0`：归档记录保存正文全文（`text`）；`0.21.0`：知识库数据层与业务模块；`0.22.0`：知识库接进侧栏；`0.22.1`：修 OCR 失败连坐正文；`0.22.2`：知识库候选打分让定义段排第一）
@@ -457,3 +458,41 @@ WisdoMark 的知识资产分两处：**仓库内**（跟着 git 走，clone 即�
 > ⚠️ 这里**刻意不写「最后一次同步是哪个提交、领先几个」** ——
 > 那种数字写进去的那一刻就开始过期（更新这句话本身又是一次提交，
 > 提交完数字立刻又不对了）。**以 `git ls-remote` 的实测结果为准。**
+
+---
+
+## 十一、桌面端（Electron）
+
+### 怎么搭的（几乎没重写业务代码）
+
+| 层 | 做法 |
+|---|---|
+| 界面 | 原样加载 `src/sidepanel/sidepanel.html`；`preload.js` shim 了 7 个 `chrome.*` API |
+| 消息 | 渲染进程 `chrome.runtime.sendMessage` → preload `ipcRenderer.invoke` → 主进程 `handlers.js` |
+| 抓取 | 隐藏 `BrowserWindow` 加载目标页，注入 `content-script.js`（与插件同一份） |
+| 消化 | 直接 import `digest.js`，只 shim 了 `shared.js` 读两个 JSON 的方式 |
+| 存储 | `store-file.js`：接口与 `store.js` 对齐的 JSON 文件（主进程没有 IndexedDB） |
+| 知识库 | `knowledge.js` 的 `lookup()` 加了可选 `records` 参数，桌面端注入文件记录 |
+
+目录 `desktop/`，7 个验证脚本 `verify-*.js`，细节看 `desktop/README.md`。
+
+### 三个只在打包后才暴露的坑
+
+1. **`app.isPackaged` 会误判** —— 用官方 `electron.exe` 加载 `resources/app.asar` 时它返回 `false`。
+   所有 `ROOT` 必须用 `__dirname.includes('app.asar')` 判断，不能信 `isPackaged`。
+2. **`store-file.js` 漏改** —— 界面完全正常，一点消化就报「找不到 `resources\src\background\store.js`」。
+   **打包后必须真实跑一次消化，界面能开 ≠ 业务能跑。**
+3. **`extraResources` 漏了 `vendor/`** —— `ocr.js` 是顶层 import OCR 引擎的，少了它整个 `sidepanel.js`
+   不执行，表现为「界面静态部分在，但徽标是 `—`、Ollama 一直检测中」。
+
+### 本机 SAC 问题（未彻底解决）
+
+打包出的 `WisdoMark.exe` 被**智能应用控制（SAC）**拦：「无法验证其发布者」。
+绕过方式：用 **Electron 官方签名的 `electron.exe`** 加载同一份 `resources/app.asar`（已验证可用）。
+
+局限：目录 450 MB、任务栏显示 `electron`。要真正双击 `WisdoMark.exe`，
+只有两条路：**代码签名**（要证书）或**关闭 SAC**（不可逆）。
+
+### 还没接的
+
+当前页 / 批量 / 画像 / 行动清单（明确回「暂未接入」）、模型选择、重新分类、trace、失败日志、OCR。
