@@ -81,6 +81,33 @@ WisdoMark 把这个死循环拆掉：插件直接读你的收藏夹，用**本�
 
 ---
 
+## 桌面版（Electron）
+
+同一个内核，两种形态。桌面版**复用扩展的抓取与消化链路**，业务代码几乎没改。
+
+![桌面版主界面](assets/desktop-main.png)
+
+![归档：4 条真实消化结果](assets/desktop-archive.png)
+
+| 对比 | 浏览器扩展 | 桌面版 |
+|---|---|---|
+| 打开方式 | 浏览器侧栏 | 独立窗口 |
+| 数据存哪 | 浏览器 IndexedDB | 本地 `data.json`（换浏览器不丢） |
+| 抓取 | 当前标签页注入 | 隐藏窗口加载目标页 |
+| 已接 | 全部 6 个入口 | 贴网址消化 / 归档 / 知识库 / 画像 / 行动清单 |
+| 未接 | — | 当前页 / 批量 / 图文帖 OCR |
+
+**技术上做了什么**（详细在 `desktop/README.md`）：
+
+- `preload.js` 把界面用到的 7 个 `chrome.*` API 垫了一层，消息经 IPC 转给主进程
+- 存储从 IndexedDB 换成 JSON 文件（主进程没有 IndexedDB），去重规则仍从 `store.js` 引入
+- 抓取、消化、prompt、校验规则**全部复用**，只 shim 了读配置那一处
+
+```bash
+cd desktop && npm install && npm start   # 开发
+npm run dist                              # 打包（portable exe，约 104 MB）
+```
+
 ## 它是怎么搭的
 
 没有后端、没有数据库服务、没有云 —— 全在这台机器上，在这一个扩展里。
