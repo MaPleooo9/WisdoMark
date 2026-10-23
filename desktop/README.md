@@ -61,11 +61,18 @@ npm run dist
 - 两个 target 默认输出同名（`WisdoMark-0.1.0-x64.exe`），nsis 失败留下的 **189 KB stub 会把 portable 覆盖掉**
 - nsis 在签卸载器那步调 Wine，本机报 `spawn UNKNOWN`
 
-**打包后必须验的两件事**（都踩过）：
+**打包后必须验的三件事**（都踩过）：
 
 1. **`resources/app-src/vendor/` 必须在** —— `src/sidepanel/ocr.js` 是**顶层 import** OCR 引擎的。
    少了它整个 `sidepanel.js` 加载失败，表现为「静态界面在，但版本徽标是 `—`、Ollama 一直检测中」。
 2. **`main.js` 必须把 GPU 参数写进代码**（`appendSwitch`）—— 用户双击不会带命令行参数。
+3. **必须真实跑一次消化，不能只验证「界面能开」** —— `app.asar` 的路径在业务代码里才第一次被用到。
+   `store-file.js` 漏改 `__dirname/..` 时，界面一切正常，一点消化就报
+   `Cannot find module ...\resources\src\background\store.js`（少一层 `app-src`）。
+
+> **所有** `__dirname` 的用法都要用「在不在 `app.asar` 里」判断，不能用 `app.isPackaged`：
+> 直接用官方 `electron.exe` 加载 `resources/app.asar` 时 `process.defaultApp` 仍是 `true`，
+> `isPackaged` 会误判成 `false`，`ROOT` 落到 `resources/` 上。
 
 > 本机环境（WorkBuddy 沙箱）的 Device Guard 会拦未签名的新 exe：
 > `已被组织 Device Guard 策略阻止`。所以「真机双击」这条**在当前环境验不了**，

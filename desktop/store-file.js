@@ -11,7 +11,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
-const ROOT = path.join(__dirname, '..');
+// 与 handlers.js 保持一致：用 __dirname 在不在 asar 里判断。
+// 之前这里还是 path.join(__dirname,'..')，打包后少一层 app-src，
+// 报 "Cannot find module ...\resources\src\background\store.js"（2026-10-23）。
+const ROOT = __dirname.includes('app.asar')
+  ? path.join(process.resourcesPath, 'app-src')
+  : path.join(__dirname, '..');
 
 let storeMod = null;
 async function loadStoreModule() {
