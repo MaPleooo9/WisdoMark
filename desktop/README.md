@@ -12,6 +12,7 @@
 | 侧栏界面原样加载 | `verify-ui.js` | ✅ 6 个 tab / 6 个 pane / Ollama 探活正常（2 个模型） |
 | 文件存储 + 知识库检索 | `verify-data.js` | ✅ 导入 4 篇 / 归档搜索 / 搜 Token 出定义段 / 建卡落库 |
 | IPC 全链路（界面 → 主进程） | `verify-ipc.js` | ✅ 6/6，用的是与 `main.js` 同一份 handler |
+| **贴网址就消化** | `verify-digest-url.js` | ✅ 抓 924 字 → 「生活常识」+ 10 要点 → 落库带全文，26.8s |
 
 **结论：抓取与消化可以零改动复用。** 唯一需要适配的是 `shared.js` 读配置的方式（`chrome.runtime.getURL` + `fetch`）—— 用一个 `file://` 的 shim 就够，业务代码一行没动。
 
@@ -46,9 +47,9 @@ unset ELECTRON_RUN_AS_NODE
 
 ## 还没做
 
-- **`DIGEST_URL` 抓取**：主进程要起隐藏的 `BrowserWindow` 执行 `content-script.js`（`verify-fetch.js` 已证明可行）
 - 「当前页面 / 批量 / 画像 / 行动清单」：桌面端先不接，消息会明确回「暂未接入」
-- 归档导出 / 导入：handler 已接，但界面的文件选择框还没验
+- 归档导出 / 导入：handler 已接，但界面的文件选择框还没单独验
+- OCR：图文帖暂不处理（桌面端先跳过）
 - 打包（electron-builder，暂不做）
 
 ## 存储：JSON 文件，不是 IndexedDB

@@ -8,6 +8,7 @@ const { pathToFileURL, fileURLToPath } = require('node:url');
 
 const ROOT = path.join(__dirname, '..');
 const storeFile = require('./store-file.js');
+const { fetchPage } = require('./fetcher.js');
 
 // shared.js 用 chrome.runtime.getURL + fetch 读两个 JSON。
 // 主进程没有 chrome，shim 一份 file:// 版本。
@@ -40,6 +41,15 @@ async function loadMods() {
   return mods;
 }
 
+// 用户经常只粘 "example.com/a/b"，补上协议头再试
+function normalizeUrl(input) {
+  const value = String(input || '').trim();
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (/^[\w-]+(\.[\w-]+)+(\/|$|\?|#)/.test(value)) return `https://${value}`;
+  return null;
+}
+
 async function handleMessage(msg) {
   const type = msg?.type || '';
 
@@ -48,6 +58,87 @@ async function handleMessage(msg) {
       case 'PING_OLLAMA': {
         const { llm } = await loadMods();
         return await llm.pingOllama();
+      }
+
+      // 贴网址就消化：抓取 → 护栏 → 消化 → 落库
+      case 'DIGEST_URL': {
+        const target = normalizeUrl(msg.url);
+        if (!target) return { ok: false, error: '请填一个 http/https 开头的链接' };
+
+        const captured = await fetchPage(target);
+        if (!captured.ok) return captured;
+
+        if (captured.consentWall) {
+          return {
+            ok: false,
+            error: '这一页是 Cookie / 隐私声明页，没有可消化的正文',
+            extract: { consentWall: captured.consentWall, lowContent: true },
+          };
+        }
+
+        if (captured.loginWall) {
+          return {
+            ok: false,
+            error: '这一页需要先登录（登录 / 验证码 / 权限校验）',
+            extract: { loginWall: captured.loginWall, lowContent: true },
+          };
+        }
+
+        if (captured.charCount < 400) {
+          return {
+            ok: false,
+            error: `正文只有 ${captured.charCount} 字，没有可总结的实质内容`,
+            source: { title: captured.title, url: captured.url, charCount: captured.charCount },
+            extract: { lowContent: true },
+          };
+        }
+
+        const { digest } = await loadMods();
+        const result = await digest.digestDocument({
+          title: captured.title,
+          url: captured.url,
+          text: captured.text,
+        });
+
+        if (!result.ok) {
+          return {
+            ok: false,
+            error: result.error || '模型判定这一页没有可消化的正文',
+            source: { title: captured.title, url: captured.url, charCount: captured.charCount },
+            extract: { lowContent: false },
+            attempts: result.attempts,
+          };
+        }
+
+        const archive = await storeFile.saveDigest({
+          url: captured.url,
+          title: captured.title,
+          category: result.value.category,
+          summary: result.value.summary,
+          points: result.value.points,
+          charCount: captured.charCount,
+          // 0.20.0 起归档带全文 —— 桌面端知识库的原料
+          text: captured.text,
+          model: result.meta?.model || '',
+          promptVersion: result.meta?.promptVersion || '',
+          attempts: Array.isArray(result.attempts) ? result.attempts.length : 0,
+          trace: null,
+          ocr: null,
+        });
+
+        return {
+          ok: true,
+          value: result.value,
+          source: {
+            ...result.source,
+            title: captured.title,
+            url: captured.url,
+            charCount: captured.charCount,
+          },
+          extract: { lowContent: false, loginWall: null, consentWall: null },
+          archive,
+          finishedAt: Date.now(),
+        };
       }
 
       case 'GET_ACTIVE_TAB':
