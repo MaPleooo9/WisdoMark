@@ -491,6 +491,7 @@ B 站动态、小红书笔记、公众号长图这类内容的干货往往整段
 | 2 | 完整功能：分类归档、画像推断、可行动清单、落库与搜索 | ✅ 已完成 |
 | 3 | 评测与护栏：评测集 + 跑分脚本 + 指标上墙 ★ | ✅ 已完成（分类 / 护栏 / 摘要质量三组指标） |
 | 4 | 打磨与开源：trace、架构图、LICENSE、演示图 | ✅ 已完成（含「照本文档跑起来」的实测验收） |
+| 5 | **桌面端（Electron）**：贴网址消化、归档、知识库、画像、行动清单 | ✅ 已完成（2026-10-23；打包产物 104 MB） |
 
 ---
 
@@ -502,10 +503,14 @@ B 站动态、小红书笔记、公众号长图这类内容的干货往往整段
 | 存储 | `chrome.storage.local` + IndexedDB |
 | 模型 | 本地 Ollama `qwen3:8b`（`http://localhost:11434/api/chat`，JSON 模式） |
 | 图片文字 | 本地 Tesseract.js `chi_sim`（WASM，引擎随仓库走 `vendor/tesseract/`，不联网） |
-| 界面 | `chrome.sidePanel` 侧栏 |
+| 界面 | `chrome.sidePanel` 侧栏；桌面端用 Electron 加载**同一个** `sidepanel.html` |
+| 桌面端 | Electron 45 + electron-builder（portable exe） |
 | 评测 | Python 独立脚本（与插件解耦） |
 
-**已明确不做**：独立后端、云数据库、云模型（起步阶段）、B 站**视频字幕**（接口已停更；图文动态走 OCR，已支持）、桌面 exe。
+**已明确不做**：独立后端、云数据库、云模型（起步阶段）、B 站**视频字幕**（接口已停更；图文动态走 OCR，已支持）。
+
+> 桌面 exe 曾在「不做」清单里（理由：逆解析书签文件脆、打包重）。2026-10-23 做了，
+> 但换了路径：Electron 复用扩展内核 + 隐藏窗口抓取，**不碰书签文件**。见上文「桌面版」。
 
 ---
 
@@ -531,6 +536,13 @@ src/
   sidepanel/                     侧栏界面（html / css / js）
     ocr.js                          图片文字识别（离线，跑在侧栏）
     batch.js                        批量消化的编排（跑在侧栏，见上文说明）
+desktop/                         Electron 桌面端（复用上面的内核）
+  main.js                         主进程：窗口 + IPC 注册
+  handlers.js                     消息处理（单一来源，main.js 与验证脚本共用）
+  preload.js                      chrome.* 的 shim（界面只用 7 个 API）
+  fetcher.js                      隐藏窗口抓正文（注入 content-script）
+  store-file.js                   文件存储（接口与 store.js 对齐）
+  verify-*.js                     8 个验证脚本（窗口 / 抓取 / 消化 / 界面 / 数据 / IPC / 全链路 / 画像）
 ```
 
 `shared/` 是刻意的设计：prompt、调用参数、输出校验规则都只存一份 JSON，**插件和阶段 3 的 Python 评测脚本读同一份**。否则两套实现会让评测分数失去意义——分数只代表那个 Python 脚本，不代表插件。
