@@ -7,7 +7,12 @@
   "scripts": {
     "start": "electron .",
     "verify:window": "electron verify-window.js",
-    "verify:fetch": "electron verify-fetch.js"
+    "verify:fetch": "electron verify-fetch.js",
+    "verify:digest": "electron verify-digest.js",
+    "verify:ui": "electron verify-ui.js",
+    "verify:data": "electron verify-data.js",
+    "verify:ipc": "electron verify-ipc.js",
+    "verify:digest-url": "electron verify-digest-url.js"
   },
   "devDependencies": {
     "electron": "^45.0.0"

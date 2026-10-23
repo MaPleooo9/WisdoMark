@@ -126,16 +126,26 @@ async function handleMessage(msg) {
           ocr: null,
         });
 
+        // 桌面端不做 OCR：图文帖（正文短 + 图多）在扩展里会先识别图片文字再消化，
+        // 这里直接按正文来。标出来，别让人以为图里的字被处理过。
+        const ocrSkipped =
+          Array.isArray(captured.images) && captured.images.length >= 2 && captured.charCount < 2000;
+
         return {
           ok: true,
           value: result.value,
+          // 结果卡片靠 meta / attempts 显示「模型 · 尝试次数 · 耗时」；
+          // 不传这两个字段，卡片那行就是空的（不报错，但信息丢了）。
+          meta: result.meta,
+          attempts: result.attempts,
           source: {
             ...result.source,
             title: captured.title,
             url: captured.url,
             charCount: captured.charCount,
           },
-          extract: { lowContent: false, loginWall: null, consentWall: null },
+          extract: { lowContent: false, loginWall: null, consentWall: null, ocrSkipped },
+          ocr: ocrSkipped ? { used: false, skipped: true, total: captured.images.length } : null,
           archive,
           finishedAt: Date.now(),
         };

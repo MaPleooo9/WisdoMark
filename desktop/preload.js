@@ -11,6 +11,10 @@ const { ipcRenderer } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
+// 界面徽标显示的版本号从根 manifest.json 读，不硬编码。
+// 之前写死 '0.23.0'，与实际版本对不上，属于「界面在说假话」。
+const extManifest = require('../manifest.json');
+
 const ROOT = path.join(__dirname, '..');
 
 // storage.local：用 localStorage 兜住。
@@ -67,7 +71,7 @@ const chromeShim = {
   runtime: {
     lastError: undefined,
     id: 'wisdomark-desktop',
-    getManifest: () => ({ version: '0.23.0', name: 'WisdoMark Desktop' }),
+    getManifest: () => ({ version: extManifest.version, name: 'WisdoMark Desktop' }),
     getURL: (relative) => pathToFileURL(path.join(ROOT, relative)).href,
     // 核心：所有业务消息转给主进程
     sendMessage(msg, cb) {
