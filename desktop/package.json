@@ -12,9 +12,11 @@
     "verify:ui": "electron verify-ui.js",
     "verify:data": "electron verify-data.js",
     "verify:ipc": "electron verify-ipc.js",
-    "verify:digest-url": "electron verify-digest-url.js"
+    "verify:digest-url": "electron verify-digest-url.js",
+    "dist": "electron-builder --win --publish never"
   },
   "devDependencies": {
-    "electron": "^45.0.0"
+    "electron": "^45.0.0",
+    "electron-builder": "^26.15.3"
   }
 }

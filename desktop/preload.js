@@ -11,11 +11,9 @@ const { ipcRenderer } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
-// 界面徽标显示的版本号从根 manifest.json 读，不硬编码。
-// 之前写死 '0.23.0'，与实际版本对不上，属于「界面在说假话」。
-const extManifest = require('../manifest.json');
-
-const ROOT = path.join(__dirname, '..');
+// 打包后 __dirname 在 app.asar 里，而界面/业务模块在 resources/app-src（extraResources）
+const isPackaged = __dirname.includes('app.asar');
+const ROOT = isPackaged ? path.join(process.resourcesPath, 'app-src') : path.join(__dirname, '..');
 
 // storage.local：用 localStorage 兜住。
 // 侧栏里两种风格都有 —— 回调式 get(keys, cb) 和 Promise 式 set(...).catch()。
@@ -71,7 +69,15 @@ const chromeShim = {
   runtime: {
     lastError: undefined,
     id: 'wisdomark-desktop',
-    getManifest: () => ({ version: extManifest.version, name: 'WisdoMark Desktop' }),
+    // 版本号由主进程给：preload 里 require 绝对路径的 JSON 在打包后不稳定，
+    // 之前写死 '0.23.0' 又会让界面说假话。
+    getManifest: () => {
+      try {
+        return ipcRenderer.sendSync('wm:manifest');
+      } catch {
+        return { version: '0.0.0', name: 'WisdoMark Desktop' };
+      }
+    },
     getURL: (relative) => pathToFileURL(path.join(ROOT, relative)).href,
     // 核心：所有业务消息转给主进程
     sendMessage(msg, cb) {

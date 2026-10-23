@@ -2,11 +2,15 @@
 //
 // 复用 src/content/content-script.js（与插件同一份），不重写提取逻辑。
 // 已验证（verify-fetch.js）：小黑盒 924 字、5 张图、无登录墙。
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, app } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const ROOT = path.join(__dirname, '..');
+// 与 handlers.js 保持一致：开发态 = 仓库根，打包后 = resources/app-src
+const ROOT = app.isPackaged
+  ? path.join(process.resourcesPath, 'app-src')
+  : path.join(__dirname, '..');
+
 const SCRIPT_PATH = path.join(ROOT, 'src', 'content', 'content-script.js');
 
 // SPA 渲染稳定要时间。插件里是 6 秒前台兜底，这里给 7 秒。

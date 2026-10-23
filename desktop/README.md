@@ -48,6 +48,29 @@ unset ELECTRON_RUN_AS_NODE
 > Electron 的 `process.argv` 结构和 Node 不同，**不要假定 `argv[2]` 是 URL**（实测拿到空串，
 > 报 `ERR_INVALID_URL`）；扫 `argv` 里 `^https?://` 的那一项。
 
+## 打包
+
+```bash
+npm run dist
+```
+
+产物：`dist/WisdoMark-0.1.0-portable-x64.exe`（约 **104 MB**，免安装，双击即用）。
+
+**只出 `portable`，不出 `nsis`**，两个原因：
+
+- 两个 target 默认输出同名（`WisdoMark-0.1.0-x64.exe`），nsis 失败留下的 **189 KB stub 会把 portable 覆盖掉**
+- nsis 在签卸载器那步调 Wine，本机报 `spawn UNKNOWN`
+
+**打包后必须验的两件事**（都踩过）：
+
+1. **`resources/app-src/vendor/` 必须在** —— `src/sidepanel/ocr.js` 是**顶层 import** OCR 引擎的。
+   少了它整个 `sidepanel.js` 加载失败，表现为「静态界面在，但版本徽标是 `—`、Ollama 一直检测中」。
+2. **`main.js` 必须把 GPU 参数写进代码**（`appendSwitch`）—— 用户双击不会带命令行参数。
+
+> 本机环境（WorkBuddy 沙箱）的 Device Guard 会拦未签名的新 exe：
+> `已被组织 Device Guard 策略阻止`。所以「真机双击」这条**在当前环境验不了**，
+> 只验证到「代码内置开关后，不带参数启动界面完整」。个人机器上大概不会拦。
+
 ## 还没做
 
 - 「当前页面 / 批量 / 画像 / 行动清单」：桌面端先不接，消息会明确回「暂未接入」

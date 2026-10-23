@@ -24,6 +24,10 @@ const push = (label, pass, got) => {
 
 app.whenReady().then(async () => {
   ipcMain.handle('wm:message', (_e, msg) => handleMessage(msg));
+  // preload 的 getManifest 走同步 IPC
+  ipcMain.on('wm:manifest', (event) => {
+    event.returnValue = { version: require('../manifest.json').version, name: 'WisdoMark Desktop' };
+  });
   await storeFile.clearArchive();
 
   const win = new BrowserWindow({

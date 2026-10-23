@@ -1,0 +1,52 @@
+appId: com.wisdomark.desktop
+productName: WisdoMark
+copyright: Copyright © 2026 邓瑶琦
+
+directories:
+  output: dist
+  buildResources: build
+
+# 桌面端自己的代码进 asar
+files:
+  - main.js
+  - preload.js
+  - handlers.js
+  - store-file.js
+  - fetcher.js
+  - package.json
+
+# 界面 / 业务模块 / prompt 在仓库其它目录 —— 打进 resources/app-src。
+# 放 asar 外面（extraResources）而不是塞进 asar：出问题时能在资源管理器里直接看到文件，
+# 也避免 asar 内 file:// 读取的路径歧义。
+extraResources:
+  - from: ../src
+    to: app-src/src
+  - from: ../shared
+    to: app-src/shared
+  - from: ../manifest.json
+    to: app-src/manifest.json
+  # 桌面端不调 OCR，但 src/sidepanel/ocr.js 是**顶层 import** 这个引擎的 ——
+  # 不带 vendor 整个 sidepanel.js 模块会加载失败，init() 一行都不执行
+  # （表现：界面静态部分在，版本徽标是「—」、Ollama 一直「检测中…」）。
+  - from: ../vendor
+    to: app-src/vendor
+  - from: ../assets/demo-archive.json
+    to: app-src/demo-archive.json
+
+asar: true
+
+win:
+  # 只出 portable：单个 exe，双击即用，不需要安装权限。
+  # nsis 也试过，两个问题：
+  #   1. 两个 target 输出同名（WisdoMark-0.1.0-x64.exe），nsis 失败留下的 stub 会把 portable 覆盖成 189 KB
+  #   2. nsis 在签卸载器那步调 Wine，报 spawn UNKNOWN
+  # 面试演示用 portable 更稳；要安装包以后再加，artifactName 里带上 target 名区分开。
+  target:
+    - target: portable
+      arch: [x64]
+  artifactName: WisdoMark-${version}-portable-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false

@@ -6,7 +6,13 @@ const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { pathToFileURL, fileURLToPath } = require('node:url');
 
-const ROOT = path.join(__dirname, '..');
+const { app } = require('electron');
+
+// 开发态：desktop/.. = 仓库根；打包后：resources/app-src（见 electron-builder.yml 的 extraResources）
+const ROOT = app.isPackaged
+  ? path.join(process.resourcesPath, 'app-src')
+  : path.join(__dirname, '..');
+
 const storeFile = require('./store-file.js');
 const { fetchPage } = require('./fetcher.js');
 
