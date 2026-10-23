@@ -18,6 +18,8 @@ build/
 # 桌面端构建产物：electron-builder 每次打一个新目录（dist2/dist3…），
 # 一个个列不现实，统一忽略；只跟踪 electron-builder.yml
 desktop/dist*/
+# 打包后可直接运行的目录（Electron 运行时 + app.asar），700 MB，不进仓库
+desktop/app/
 
 # 系统 / 编辑器
 .DS_Store
