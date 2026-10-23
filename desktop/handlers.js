@@ -6,10 +6,13 @@ const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { pathToFileURL, fileURLToPath } = require('node:url');
 
-const { app } = require('electron');
-
 // 开发态：desktop/.. = 仓库根；打包后：resources/app-src（见 electron-builder.yml 的 extraResources）
-const ROOT = app.isPackaged
+//
+// ⚠️ 不能用 app.isPackaged 判断：直接用官方 electron.exe 加载 resources/app.asar 时，
+// process.defaultApp 仍是 true，isPackaged 会误判成 false，ROOT 落到 resources/ 上，
+// 报 "Cannot find module ...\resources\manifest.json"（2026-10-23 实测）。
+// 用 __dirname 在不在 asar 里判断，跟怎么启动无关。
+const ROOT = __dirname.includes('app.asar')
   ? path.join(process.resourcesPath, 'app-src')
   : path.join(__dirname, '..');
 
