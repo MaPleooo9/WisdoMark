@@ -40,9 +40,12 @@ function readAll() {
     return {
       digests: Array.isArray(raw.digests) ? raw.digests : [],
       concepts: Array.isArray(raw.concepts) ? raw.concepts : [],
+      // 画像 / 行动清单也落这个文件 —— 关掉重开还能看到上次结果，不必重跑模型
+      profile: raw.profile && typeof raw.profile === 'object' ? raw.profile : null,
+      actionPlan: raw.actionPlan && typeof raw.actionPlan === 'object' ? raw.actionPlan : null,
     };
   } catch {
-    return { digests: [], concepts: [] };
+    return { digests: [], concepts: [], profile: null, actionPlan: null };
   }
 }
 
@@ -268,6 +271,23 @@ async function deleteConcept(key) {
   return { ok: true, key: k };
 }
 
+// ---------------------------------------------------------------------------
+// 画像 / 行动清单
+// ---------------------------------------------------------------------------
+
+async function readMeta() {
+  const data = readAll();
+  return { profile: data.profile, actionPlan: data.actionPlan };
+}
+
+async function saveMeta(patch = {}) {
+  const data = readAll();
+  if ('profile' in patch) data.profile = patch.profile;
+  if ('actionPlan' in patch) data.actionPlan = patch.actionPlan;
+  writeAll(data);
+  return { ok: true };
+}
+
 module.exports = {
   dataPath,
   countDigests,
@@ -281,4 +301,6 @@ module.exports = {
   getConcept,
   saveConcept,
   deleteConcept,
+  readMeta,
+  saveMeta,
 };

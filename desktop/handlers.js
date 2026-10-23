@@ -59,6 +59,27 @@ function normalizeUrl(input) {
   return null;
 }
 
+// 分类分布由代码统计，不经过模型（它在计数上不可靠，算错了没人看得出来）。
+// 与 service-worker.js 的 countByCategory 同源逻辑：那边没导出、且 import 了 chrome.*，
+// 桌面端引不了；3 行纯函数，抄一份可以接受。
+function countByCategory(records) {
+  const byCategory = {};
+  for (const r of records) {
+    const key = r.category || '未分类';
+    byCategory[key] = (byCategory[key] || 0) + 1;
+  }
+  return byCategory;
+}
+
+// 画像与清单取同一批素材（最近 N 条），否则会出现
+// 「画像说他偏实操、清单却让他先读理论」这种自相矛盾。
+function recentRecords(all, limit) {
+  return all
+    .slice()
+    .sort((a, b) => b.digestedAt - a.digestedAt)
+    .slice(0, limit);
+}
+
 async function handleMessage(msg) {
   const type = msg?.type || '';
 
@@ -285,10 +306,137 @@ async function handleMessage(msg) {
         return { ok: true, failures: [], total: 0 };
       case 'CLEAR_FAILURES':
         return { ok: true };
-      case 'GET_PROFILE':
-        return { ok: true, profile: null };
-      case 'GET_ACTIONS':
-        return { ok: true, actionPlan: null };
+      // 画像 / 行动清单：产品的核心卖点（「对内容的理解」→「对下一步的建议」）。
+      // 逻辑与 service-worker 的 buildProfileNow / buildActionsNow 一致，
+      // 只是把存储从 chrome.storage 换成文件。
+      case 'BUILD_PROFILE': {
+        const { digest } = await loadMods();
+        const records = recentRecords(await storeFile.readAllDigests(), 40);
+
+        if (records.length < 5) {
+          return {
+            ok: false,
+            error:
+              `归档里只有 ${records.length} 条，太少 —— 这样推出来的方向多半不准，所以先不给结论。` +
+              '再消化几篇，攒够 5 条以上再来。',
+            sampleCount: records.length,
+          };
+        }
+
+        const result = await digest.buildProfile({
+          items: records.map((r) => ({ title: r.title, category: r.category, summary: r.summary })),
+        });
+
+        if (!result.ok) return { ok: false, error: result.error, attempts: result.attempts };
+
+        const payload = {
+          ok: true,
+          themes: result.themes,
+          level: result.level,
+          stageReason: result.stageReason,
+          lean: result.lean,
+          summary: result.summary,
+          sampleCount: records.length,
+          byCategory: countByCategory(records),
+          builtAt: Date.now(),
+          meta: result.meta,
+        };
+
+        await storeFile.saveMeta({ profile: payload });
+        return payload;
+      }
+
+      case 'GET_PROFILE': {
+        const { profile } = await storeFile.readMeta();
+        return { ok: true, profile: profile || null };
+      }
+
+      case 'BUILD_ACTIONS': {
+        const { digest } = await loadMods();
+        const records = recentRecords(await storeFile.readAllDigests(), 40);
+
+        if (records.length < 5) {
+          return {
+            ok: false,
+            error:
+              `归档里只有 ${records.length} 条，太少 —— 基于三五条内容提的「下一步」多半是套话。` +
+              '再消化几篇，攒够 5 条以上再来。',
+            sampleCount: records.length,
+          };
+        }
+
+        const items = records.map((r) => ({
+          title: r.title,
+          category: r.category,
+          summary: r.summary,
+          url: r.url,
+        }));
+
+        // 清单必须基于画像。没算过就顺手算一份 —— 用户点的是「生成清单」，
+        // 不该先被要求去点另一个按钮。
+        const { profile: cached } = await storeFile.readMeta();
+        let profile = cached;
+        let profileStep = 'reused';
+
+        if (!profile?.themes?.length) {
+          const built = await digest.buildProfile({ items });
+          if (!built.ok) {
+            return {
+              ok: false,
+              error: `生成清单前先要算出画像，那一步失败了：${built.error}`,
+              stage: 'profile',
+              attempts: built.attempts,
+            };
+          }
+
+          profileStep = 'built';
+          profile = {
+            ok: true,
+            themes: built.themes,
+            level: built.level,
+            stageReason: built.stageReason,
+            lean: built.lean,
+            summary: built.summary,
+            sampleCount: items.length,
+            byCategory: countByCategory(records),
+            builtAt: Date.now(),
+            meta: built.meta,
+          };
+
+          await storeFile.saveMeta({ profile });
+        }
+
+        const result = await digest.buildActionPlan({ items, profile });
+        if (!result.ok) {
+          return { ok: false, error: result.error, stage: 'actions', attempts: result.attempts };
+        }
+
+        const payload = {
+          ok: true,
+          gap: result.gap,
+          // refs 是条目序号，投影成界面能直接用的形状（侧栏不必再查归档）
+          actions: result.actions.map((a) => ({
+            ...a,
+            refs: (a.refs || []).map((n) => ({
+              index: n,
+              title: items[n - 1]?.title || '',
+              url: items[n - 1]?.url || '',
+            })),
+          })),
+          sampleCount: items.length,
+          profileStep,
+          builtAt: Date.now(),
+          meta: result.meta,
+        };
+
+        await storeFile.saveMeta({ actionPlan: payload });
+        return payload;
+      }
+
+      case 'GET_ACTIONS': {
+        const { actionPlan } = await storeFile.readMeta();
+        return { ok: true, actionPlan: actionPlan || null };
+      }
       case 'GET_RECENT_BOOKMARKS':
       case 'GET_BOOKMARKS_IN_FOLDER':
         return { ok: true, items: [] };
