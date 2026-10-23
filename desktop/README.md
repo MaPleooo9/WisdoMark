@@ -17,6 +17,7 @@
 | IPC 全链路（界面 → 主进程） | `verify-ipc.js` | ✅ 6/6，用的是与 `main.js` 同一份 handler |
 | **贴网址就消化** | `verify-digest-url.js` | ✅ 抓 924 字 → 「生活常识」+ 10 要点 → 落库带全文，26.8s |
 | **画像 + 行动清单** | `verify-profile.js` | ✅ 11/11 —— 8 条真实摘要 → 4 个方向 + 4 个动作，清单复用画像 |
+| **诊断 trace + 失败日志** | `verify-trace.js` | ✅ 12/12 —— 记下 1 次调用 / 17.9s / 3022 输入 token；失败队列能读能清 |
 
 **结论：抓取与消化可以零改动复用。** 唯一需要适配的是 `shared.js` 读配置的方式（`chrome.runtime.getURL` + `fetch`）—— 用一个 `file://` 的 shim 就够，业务代码一行没动。
 

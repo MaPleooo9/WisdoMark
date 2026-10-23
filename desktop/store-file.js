@@ -43,9 +43,12 @@ function readAll() {
       // 画像 / 行动清单也落这个文件 —— 关掉重开还能看到上次结果，不必重跑模型
       profile: raw.profile && typeof raw.profile === 'object' ? raw.profile : null,
       actionPlan: raw.actionPlan && typeof raw.actionPlan === 'object' ? raw.actionPlan : null,
+      // 失败的诊断日志。与归档分开存（同 trace.js 的理由）：
+      // 归档是用户资产，画像/搜索都会读它；混进失败记录会让它们把空条目当成内容。
+      failures: Array.isArray(raw.failures) ? raw.failures : [],
     };
   } catch {
-    return { digests: [], concepts: [], profile: null, actionPlan: null };
+    return { digests: [], concepts: [], profile: null, actionPlan: null, failures: [] };
   }
 }
 
@@ -288,6 +291,30 @@ async function saveMeta(patch = {}) {
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// 失败诊断日志（环形 30 条，新的在前）
+// ---------------------------------------------------------------------------
+
+const FAILURE_LIMIT = 30;
+
+async function readFailures() {
+  return readAll().failures;
+}
+
+async function pushFailure(record) {
+  const data = readAll();
+  data.failures = [record, ...data.failures].slice(0, FAILURE_LIMIT);
+  writeAll(data);
+  return { ok: true, count: data.failures.length };
+}
+
+async function clearFailures() {
+  const data = readAll();
+  data.failures = [];
+  writeAll(data);
+  return { ok: true };
+}
+
 module.exports = {
   dataPath,
   countDigests,
@@ -303,4 +330,7 @@ module.exports = {
   deleteConcept,
   readMeta,
   saveMeta,
+  readFailures,
+  pushFailure,
+  clearFailures,
 };

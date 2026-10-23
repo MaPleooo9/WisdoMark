@@ -39,13 +39,14 @@ globalThis.fetch = async (url, opts) => {
 let mods = null;
 async function loadMods() {
   if (!mods) {
-    const [knowledge, digest, llm, shared] = await Promise.all([
+    const [knowledge, digest, llm, shared, trace] = await Promise.all([
       import(pathToFileURL(path.join(ROOT, 'src/background/knowledge.js')).href),
       import(pathToFileURL(path.join(ROOT, 'src/background/digest.js')).href),
       import(pathToFileURL(path.join(ROOT, 'src/background/llm.js')).href),
       import(pathToFileURL(path.join(ROOT, 'src/background/shared.js')).href),
+      import(pathToFileURL(path.join(ROOT, 'src/background/trace.js')).href),
     ]);
-    mods = { knowledge, digest, llm, shared };
+    mods = { knowledge, digest, llm, shared, trace };
   }
   return mods;
 }
@@ -123,14 +124,38 @@ async function handleMessage(msg) {
           };
         }
 
-        const { digest } = await loadMods();
+        const { digest, trace: traceMod } = await loadMods();
+        const digestStart = Date.now();
         const result = await digest.digestDocument({
           title: captured.title,
           url: captured.url,
           text: captured.text,
         });
+        const ms = Date.now() - digestStart;
 
         if (!result.ok) {
+          // 只有「压根没拿到结果」（网络错 / 结构反复不过）才记失败日志。
+          // 模型判 ok:false 是护栏正常工作，不记 —— 混进去会把失败率淹掉。
+          await storeFile.pushFailure({
+            at: Date.now(),
+            url: captured.url,
+            title: captured.title,
+            origin: 'desktop',
+            error: result.error,
+            networkError: !!result.networkError,
+            ms,
+            calls: Array.isArray(result.attempts) ? result.attempts.length : 0,
+            extract: {
+              charCount: captured.charCount,
+              lowContent: captured.charCount < 400,
+              loginWall: null,
+              consentWall: null,
+              foregroundFallback: false,
+              minChars: 400,
+            },
+            attempts: traceMod.trimAttempts(result.attempts, { keepRaw: true }),
+          });
+
           return {
             ok: false,
             error: result.error || '模型判定这一页没有可消化的正文',
@@ -139,6 +164,14 @@ async function handleMessage(msg) {
             attempts: result.attempts,
           };
         }
+
+        // 成功的 trace 挂在归档记录上（与扩展同口径）：
+        // 「这一条是怎么来的」—— 调了几次、耗时、token。
+        const trace = traceMod.buildTrace({
+          attempts: result.attempts,
+          ms,
+          networkError: !!result.networkError,
+        });
 
         const archive = await storeFile.saveDigest({
           url: captured.url,
@@ -152,7 +185,7 @@ async function handleMessage(msg) {
           model: result.meta?.model || '',
           promptVersion: result.meta?.promptVersion || '',
           attempts: Array.isArray(result.attempts) ? result.attempts.length : 0,
-          trace: null,
+          trace,
           ocr: null,
         });
 
@@ -302,10 +335,12 @@ async function handleMessage(msg) {
       }
 
       // 桌面端暂不适用的能力：明确回，不要静默
-      case 'GET_FAILURES':
-        return { ok: true, failures: [], total: 0 };
+      case 'GET_FAILURES': {
+        const failures = await storeFile.readFailures();
+        return { ok: true, failures, total: failures.length };
+      }
       case 'CLEAR_FAILURES':
-        return { ok: true };
+        return await storeFile.clearFailures();
       // 画像 / 行动清单：产品的核心卖点（「对内容的理解」→「对下一步的建议」）。
       // 逻辑与 service-worker 的 buildProfileNow / buildActionsNow 一致，
       // 只是把存储从 chrome.storage 换成文件。
